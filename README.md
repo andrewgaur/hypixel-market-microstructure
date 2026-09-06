@@ -1,6 +1,5 @@
 # Hypixel Skyblock Bazaar OFI Analysis
 
-Quick Desc.
 this repo is a small market microstructure project that collects live order-book data from the Skyblock bazaar REST API, and tests whether order flow imbalance has any predictive relationship with short-term price movement.
 
 ## What is this?
@@ -26,9 +25,10 @@ Conclusively, at the current sample size, the analysis does not find any convinc
 
 ## Running 
 
-<python bz_data_collector.py        # run continuously to collect data (Ctrl+C to stop)>
-<python bz_ofi_pipeline.py      # process collected data and generate results>
-
+```
+python bz_data_collector.py        # run continuously to collect data (Ctrl+C to stop)
+python bz_ofi_pipeline.py      # process collected data and generate results
+```
 # My Notes
 - this is me talking myself through my process and code.
 
