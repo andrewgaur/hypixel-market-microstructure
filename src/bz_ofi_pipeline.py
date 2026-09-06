@@ -1,13 +1,16 @@
-import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 
 
 #pandas data frame
 #read csv file with all scraped bazaar data
-df = pd.read_csv('bazaar_data.csv')
+df = pd.read_csv(BASE_DIR / "data" / 'bazaar_data.csv')
 #sorts item in df by timestamp and item (chronological per-item order)
 #and reassigns to df
 df = df.sort_values(by=['Item', 'Timestamp'])
@@ -65,7 +68,8 @@ df['Next_Mid_Price'] = df.groupby('Item')['Mid_Price'].shift(-1)
 #has to run at end to make sure .shift() isn't running on filtered data w/ gaps
 
 GAP_THRESHOLD = 90
-df = df[df['Seconds_Since_Fetch'] <= GAP_THRESHOLD]
+df['Next_Gap'] = df.groupby('Item')['Seconds_Since_Fetch'].shift(-1)
+df = df[(df['Seconds_Since_Fetch'] <= GAP_THRESHOLD) & (df['Next_Gap'] <= GAP_THRESHOLD)]
 
 
 ### ACTUAL TESTING
@@ -93,7 +97,7 @@ train_data = pd.concat(train_parts)
 test_data = pd.concat(test_parts)
 
 results = []
-for item, g in df.groupby('Item'):
+for item, g in test_data.groupby('Item'):
     r, p = stats.pearsonr(g['OFI'], g['Future_Price_Change'])
     results.append({'item': item, 'n': len(g), 'corr': r, 'pval': p})
 
@@ -123,5 +127,10 @@ ax.set_xlabel('OFI - Future Price Change Correlation')
 ax.set_ylabel('-log10(p-value)')
 ax.legend()
 plt.tight_layout()
-plt.savefig('ofi_volcano_plot.png', dpi=150)
-plt.show() 
+plt.savefig(BASE_DIR / "results" / 'ofi_volcano_plot_oos.png', dpi=150)
+
+test_data.to_csv(BASE_DIR / "results" / 'test_data.csv', index=False)
+results_df = pd.DataFrame(results)
+results_df.to_csv(BASE_DIR / "results" / 'ofi_corr_summary.csv', index=False)
+
+

@@ -4,6 +4,7 @@ import time
 import os
 import csv
 from datetime import datetime
+from pathlib import Path
 
 # bazaar api url
 URL = "https://api.hypixel.net/v2/skyblock/bazaar"
@@ -16,7 +17,11 @@ TARGET_ITEMS = ["BOOSTER_COOKIE",
                 "RECOMBOBULATOR_3000",
                 "SUMMONING_EYE"
                 ]
-CSV_FILENAME = "bazaar_data.csv"
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
+
+CSV_FILENAME = DATA_DIR / "bazaar_data.csv"
 
 #create csv file w/ headers
 # mode = write to make new file
