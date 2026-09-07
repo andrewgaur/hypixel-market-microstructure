@@ -82,15 +82,6 @@ while True:
 
             last_fetch_time = now
 
-            '''
-            #find specific target item
-            product_data = data["products"][TARGET_ITEMS]["quick_status"]
-            #extract needed numbers
-            top_bid = product_data["sellPrice"]
-            top_ask = product_data["buyPrice"]
-            bid_volume = product_data["buyVolume"]
-            ask_volume = product_data["sellVolume"]
-            '''
             
             #save data to csv
             #mode a for append to add new row
@@ -107,14 +98,6 @@ while True:
 
                     if item in data["products"]:
 
-                        #product_data = data["products"][item]["quick_status"]
-                        '''
-                        #this is lowk the wrong data to calculate OFI
-                        top_bid = product_data["sellPrice"]
-                        top_ask = product_data["buyPrice"]
-                        bid_volume = product_data["buyVolume"]
-                        ask_volume = product_data["sellVolume"]
-                        '''
                         #bid side
                         buy_orders =  data["products"][item]["buy_summary"]
                         #ask side
@@ -127,15 +110,6 @@ while True:
 
                         best_bid_price, best_bid_qty = (best_bid["pricePerUnit"], best_bid["amount"]) if best_bid else (None, None)
                         best_ask_price, best_ask_qty = (best_ask["pricePerUnit"], best_ask["amount"]) if best_ask else (None, None)
-
-                        '''
-                        alternative price and amount logic
-                        best_bid_price = max((o["pricePerUnit"] for o in buy_orders), default=None)
-                        best_bid_qty = next((o["amount"] for o in buy_orders if o["pricePerUnit"] == best_bid_price), None)
-
-                        best_ask_price = min((o["pricePerUnit"] for o in sell_orders), default=None)
-                        best_ask_qty = next((o["amount"] for o in sell_orders if o["pricePerUnit"] == best_ask_price), None)
-                        '''
 
 
                         #save specific item's row
