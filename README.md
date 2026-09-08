@@ -39,7 +39,12 @@ Essentially what i learned the hard way was that in high frequency trading, like
 
 Basically: the short term volume changes i measured don't predict price movements because metrics like OFI decay quickly, and my measurements were too slow.
 
-## possible next steps
-- extend OFI to use multiple price levels of the order book, as opposed to just top-of-book
-- collect data over a longer window to increase the power of my test set
-- multiple prediction horizons
+## intended next steps
+- several more weeks of data
+- immutable raw data plus cleaned Parquet files and a documented schema
+- retry/backoff, rate-limit handling, structured logging, and monitoring
+- unit and integration tests with github actions
+- a cli interface & reproducible environment
+- walk-forward validation, multiple prediction horizons, naive baselines, bootstrap confidence intervals, effect sizes, and a power analysis
+- a cost-aware or spread-aware backtest, regardless of conclusion
+- polished 4-6 page paper or technical report with charts and limitations
