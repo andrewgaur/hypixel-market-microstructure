@@ -1,1 +1,3 @@
-results/next.txt
+results/next/
+.venv-analysis2/
+__pycache__/
