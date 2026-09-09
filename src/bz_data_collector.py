@@ -21,9 +21,9 @@ TARGET_ITEMS = ["BOOSTER_COOKIE",
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-CSV_FILENAME = DATA_DIR / "bazaar_data.csv"
+CSV_FILENAME = DATA_DIR / "bazaar_raw_data2.csv"
 
-#create csv file w/ headers
+#create csv /efile w/ headers
 # mode = write to make new file
 
 #check if file exists
@@ -98,19 +98,46 @@ while True:
 
                     if item in data["products"]:
 
-                        #bid side
-                        buy_orders =  data["products"][item]["buy_summary"]
-                        #ask side
-                        sell_orders = data["products"][item]["sell_summary"]
+                        product = data["products"][item]
+
+                        '''
+                        skyblock names the summaries backwards,
+                        from the perspective of someone trading immediately
+                        ie, the players perspective
+                        buy summary is the offers I can buy from (asks)
+                        sell summary is the offers I can sell into (bids)
+                        '''
+                        #standing buyers, prices you recieve when selling instantly
+                        bid_orders =  product["sell_summary"]
+
+                        #standing sellers, prices you pay when buying instantly
+                        ask_orders = product["buy_summary"]
 
 
                         #explicitly take price and amount
-                        best_bid = max(buy_orders, key=lambda o: o["pricePerUnit"], default=None)
-                        best_ask = min(sell_orders, key=lambda o: o["pricePerUnit"], default=None)
+                        best_bid = max(
+                            bid_orders, 
+                            key=lambda o: o["pricePerUnit"], 
+                            default=None
+                            )
+                        
+                        best_ask = min(
+                            ask_orders, 
+                            key=lambda o: o["pricePerUnit"], 
+                            default=None
+                            )
 
                         best_bid_price, best_bid_qty = (best_bid["pricePerUnit"], best_bid["amount"]) if best_bid else (None, None)
                         best_ask_price, best_ask_qty = (best_ask["pricePerUnit"], best_ask["amount"]) if best_ask else (None, None)
 
+                        #have to double check the backwards labelling isnt crossing the data
+                        if best_bid_price is None or best_ask_price is None:
+                            print(f"Skipping {item}: missing bid or ask")
+                            continue
+                        if best_bid_price > best_ask_price:
+                            print(f"Skipping {item}: crossed quotes")
+                            continue
+                        
 
                         #save specific item's row
                         writer.writerow([
