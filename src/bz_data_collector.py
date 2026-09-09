@@ -3,8 +3,15 @@ import requests
 import time
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timezone
+import gzip
+from uuid import uuid4
 from pathlib import Path
+
+#timezone: need to record UTC
+#gzip: use to compress saved responses to reduce disk usage
+#uuid4 generate unique filenames
+
 
 # bazaar api url
 URL = "https://api.hypixel.net/v2/skyblock/bazaar"
@@ -21,7 +28,14 @@ TARGET_ITEMS = ["BOOSTER_COOKIE",
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-CSV_FILENAME = DATA_DIR / "bazaar_raw_data2.csv"
+# need folder for original raw responses from API
+# my csv will contain convenient extracted values. raw folder preserves
+# response bodies before the script selects/filters anything
+RAW_DIR = DATA_DIR / "raw"
+RAW_DIR.mkdir(exist_ok = True)
+
+
+CSV_FILENAME = DATA_DIR / "bazaar_quotes_utc.csv"
 
 #create csv /efile w/ headers
 # mode = write to make new file
@@ -62,14 +76,51 @@ GAP_THRESHOLD = 90
 while True:
     try:
         response = requests.get(URL, timeout=15)
-        #JSON text to python dictionary
-        data=response.json()
+
+        # record when computer finishes receiving the response from the API
+        received_at = datetime.now(timezone.utc)
+        current_time = received_at.isoformat(timespec="microseconds")
+
+        # put each day's responses in a separate folder
+        day_dir = RAW_DIR / received_at.strftime("%Y-%m-%d")
+        day_dir.mkdir(exist_ok = True)
+
+        #windows safe timestamp and a unique id
+        filename = (
+            received_at.strftime("%Y%m%dT%H%M%S_%fZ")
+            + "_"
+            + uuid4().hex
+            + ".body.gz"
+        )
+        raw_path = day_dir / filename
+
+
+        #save the original response body before filtering
+        # "xb" creates new file and refuses to overwrite if one already exists
+        with raw_path.open("xb") as raw_file:
+            with gzip.GzipFile(fileobj=raw_file, mode="wb") as compressed:
+                compressed.write(response.content)
+
+        # detect failed HTTP responses after preserving bodies
+        response.raise_for_status()
+
+        #convert the JSON response into a python dict
+        data = response.json()
+
+        '''
+        notes to self:
+        The .body.gz extension means a compressed response body. Successful responses
+        contain JSON, but an error response might contain something else. Saving first
+        preserves either one
+
+        If a request fails before any response arrives, there is nothing to save, so
+        the existing exception handler will print the error
+        '''
 
         #check if API returned properly
         if data.get("success") == True:
 
             #checking time
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             now = time.time()
 
             if last_fetch_time is None:
