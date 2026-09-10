@@ -1,0 +1,77 @@
+RANK 8 OF 8: A POLISHED 4-6 PAGE PAPER OR TECHNICAL REPORT
+=======================================================
+Why eighth
+----------
+The report should describe the final evidence, which depends on all earlier
+work. Keep notes and a skeleton throughout the project, but polish after a
+frozen run exists. A clear report adds value by making the study assessable.
+
+Concepts from the beginning
+---------------------------
+A research report is an argument supported by measurements. It states a
+question, explains how evidence was collected and analyzed, presents results,
+and sets limits on interpretation. A limitation is a specific constraint on
+what you can conclude, not a generic apology. Reproducibility means readers can
+trace or regenerate your evidence. A report is not automatically peer reviewed.
+
+Step-by-step implementation
+---------------------------
+1. Start a document with Question, Data, Method, Results, Limitations, and
+   Reproduction headings. Write one sentence under each before worrying about
+   formatting. Your question concerns observable snapshot OFI and future returns,
+   not whether all market microstructure signals work in all markets.
+2. Freeze one final run directory. Record input hash, code version, configuration,
+   and environment. Generate figures/tables from those outputs. Do not combine
+   a correlation from one run with a sample count from another.
+3. Allocate roughly one page each to motivation/abstract, data, methods, predictive
+   results, execution results, and limitations/references for a six-page version.
+   For four pages, combine motivation with data and combine execution/limitations.
+   Move lengthy schema and engineering details into a linked appendix or README.
+4. Describe actual data dates, items, receipt cadence, source freshness, valid
+   observation counts, missingness, and exclusions. Explain verified bid/ask
+   meanings and that summary snapshots omit within-interval events.
+5. Explain OFI and target returns with notation defined immediately. Include a
+   timeline showing training, purged label boundary, and evaluation. State which
+   baselines, horizons, tuning choices, and primary tests were predeclared.
+6. Show four useful figures: collection coverage/gaps; the chronological split;
+   effects with intervals by item/horizon; and a cost-sensitivity or equity view.
+   Include a small table comparing model MAE/MSE with baselines. If no backtest
+   was completed, say so instead of filling the space with hypothetical profit.
+7. Make captions self-contained: what is plotted, units, dates, sample size,
+   interval method, and whether coverage is pointwise or simultaneous. A chart
+   should not imply corrected significance if it only shows pointwise intervals.
+8. Report effect magnitudes, uncertainty, and consistency across folds. Avoid
+   making the lowest p-value the entire story. Constant/short series and missing
+   intervals need explicit explanations, not invisible omitted rows.
+9. Interpret negative evidence carefully: "Under this sampling and evaluation
+   design, OFI did not show robust improvement over the specified baselines."
+   Then describe whether intervals rule out a useful-sized effect. Do not claim
+   that one-minute sampling caused failure or millisecond data would fix it.
+10. Discuss specific remaining limits: source caching, truncated summaries,
+    short history, shared regimes, item selection, missingness, overlapping
+    horizons, model-selection choices, uncertain power, and assumed executions.
+    Separate resolved bugs from unavoidable measurement limitations.
+11. Add a reproducibility box: exact command, code/script hash, input manifest,
+    dependency file, random seed, data availability, and where figures originate.
+    The new analysis2 run_summary.txt and manifest.json provide a starting point,
+    not a finished paper. Cite original API/method documentation you actually use.
+12. Write the abstract last in about 150-200 words: question, sample, method,
+    principal measured result with uncertainty, and qualified conclusion. Check
+    every number against the frozen output. Proofread figures at final page size.
+13. Ask a technically informed reader to explain your main claim back to you and
+    run the small reproduction example. If they confuse a snapshot measurement
+    with a trade record, or an exploratory finding with confirmation, revise.
+
+Small exercise
+--------------
+For every major sentence in the Results section, write its supporting filename
+and column in a private checklist. "OFI improved MSE" needs baseline and model
+errors from the same evaluation rows. "The strategy earned X" needs a reconciled
+net ledger. "The effect disappears quickly" needs an actual decay experiment,
+not merely a nonsignificant correlation at one horizon.
+
+Completion checkpoint
+---------------------
+A reader can identify the question, inspect supporting evidence, understand
+uncertainty and execution assumptions, and reproduce the central numbers from
+one documented run. The report fits 4-6 readable pages without hiding limitations.

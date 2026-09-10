@@ -1,0 +1,86 @@
+RANK 7 OF 8: A COST-AWARE OR SPREAD-AWARE BACKTEST
+===============================================
+Why seventh
+-----------
+Execution assumptions are meaningful only after quote semantics and prediction
+timing are sound. A backtest answers a different question from correlation:
+could a specified decision rule plausibly benefit after realistic costs?
+
+Concepts from the beginning
+---------------------------
+A backtest is a historical simulation of decisions, trades, cash, and inventory.
+Inventory is the number of item units you hold. Long means owning an item; flat
+means holding none. Shorting means selling borrowed inventory, which you should
+not assume this market supports. Start with long or flat.
+
+The spread is ask minus bid. Buying immediately pays ask; selling immediately
+receives bid. A fee is an explicit charge. Slippage is getting a worse execution
+price than your reference quote, for example because available quantity is small.
+Latency is the delay between observing information and executing a decision.
+PnL means profit and loss. Gross PnL excludes some costs; net PnL includes them.
+
+Step-by-step implementation
+---------------------------
+1. Read predictions from a frozen walk-forward run. Choose one item and one
+   horizon first. Do not train a new rule using the same final returns you are
+   about to call the backtest. Tune thresholds only on earlier development data.
+2. Write the rule in plain English: when flat, enter only if predicted rise is
+   larger than estimated round-trip costs plus a declared margin; when holding,
+   wait the specified duration and exit. Negative predictions mean stay flat.
+3. Specify initial cash and fixed small order size. Track a ledger with time,
+   event, item, quantity, price, fees, cash_after, and inventory_after. Begin
+   with one position at a time so capital cannot be accidentally reused.
+4. Decide timing before seeing PnL. A signal using a response at t is known
+   after receipt. Use a next valid observed ask after your chosen latency for
+   a conservative entry convention; exit using a subsequent observed bid.
+   A quote observed later is a simulation assumption, not proof of an actual fill.
+5. Match the predicted target to the traded holding interval. A t-to-t+5-minute
+   midpoint prediction is not exactly a prediction from delayed entry to five
+   minutes after entry. Realign the training target or disclose this mismatch;
+   don't silently pretend the two experiments are identical.
+6. Calculate a hand example before writing a loop. Buy two units at 101 and
+   sell at 102: gross price PnL is 2*(102-101)=2 coins. If artificial entry and
+   exit fees are each 1%, cost is 202*1.01=204.02 and proceeds 204*.99=201.96;
+   net PnL is -2.06. These rates are teaching examples, not actual Bazaar fees.
+7. Verify applicable current fee rules and account assumptions before using a
+   realistic rate. Until then, label scenario rates explicitly. Using ask for
+   entry and bid for exit already includes the spread: don't subtract it again.
+8. Enforce cash and size constraints. If you cannot afford the order, skip it
+   with a reason. Cap size at a conservative fraction of displayed executable
+   liquidity. For larger orders, estimate prices by consuming visible levels;
+   liquidity beyond the API summaries is unknown.
+9. Prevent overlapping positions and orders from spending the same cash. When
+   expanding across items, share one portfolio cash account and use a stated
+   tie-break for simultaneous signals. Check cash/inventory after every event.
+10. Define missing exits. One policy is holding until the next observable valid
+    quote and flagging the delayed exposure. At the end, disclose open inventory
+    and its valuation convention separately. Never drop a trade just because
+    its missing exit or poor outcome is inconvenient.
+11. Test a flat-price round trip: it should lose spread plus fees. Test no
+    signals: no trades. Test insufficient cash: no purchase. Test a missing
+    exit and two simultaneous signals. Keep hand-known expected ledger values.
+12. Run frozen rules across evaluation folds. Save trades.csv and equity_curve.csv.
+    An equity curve shows cash plus marked inventory over time. Report trade
+    count, net PnL, turnover, exposure, and maximum drawdown (largest decline
+    from a previous equity peak), alongside cash/no-trade and a simple strategy.
+13. Repeat prespecified scenarios with higher slippage, greater latency, and
+    smaller size limits. Show results even when all scenarios lose. For uncertainty,
+    resample time blocks of portfolio returns rather than pretending overlapping
+    trades are independent. Few weeks seldom justify bold annualized claims.
+
+Common mistake
+--------------
+Assuming passive limit orders always fill at a favorable price invents queue
+information you did not observe. A first backtest should use clearly stated
+immediate-execution assumptions. The midpoint is not a free execution price.
+
+Current script connection
+--------------------------
+analysis2 provides chronological predictions, quotes, and fold identifiers as
+inputs for this work. It does not claim to implement a backtest or prove profit.
+Create a separate tested ledger module as the next implementation step.
+
+Completion checkpoint
+---------------------
+You can explain and replay every simulated trade, reconcile the cash account,
+and show how conclusions change with costs. An unprofitable result is retained.

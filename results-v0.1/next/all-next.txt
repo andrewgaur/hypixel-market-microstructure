@@ -1,0 +1,745 @@
+HYPIXEL BAZAAR: NEXT STEPS AND IMPLEMENTATION GUIDE
+Prepared September 8, 2026
+
+Purpose
+=======
+This guide explains all eight README next steps and turns them into a practical
+implementation plan. It is based on reading README.md, src/bz_data_collector.py,
+src/bz_ofi_pipeline.py, requirements.txt, the CSV header and initial records, and
+results/ofi_corr_summary.csv. It does not claim that the proposed features have
+already been implemented or that the existing analysis has been rerun.
+
+The central research question should be: does snapshot-based order flow imbalance
+(OFI) add useful out-of-sample information about future Bazaar price changes at
+the frequencies observable through this API? A trustworthy negative answer is a
+successful outcome. Engineering quality and statistical honesty are the goals.
+
+READ THIS FIRST: CURRENT PROJECT ISSUES
+======================================
+1. Verify the book-side interpretation before collecting weeks of derived data.
+   Your collector labels max(buy_summary) as the bid and min(sell_summary) as the
+   ask. The first BOOSTER_COOKIE CSV row has Top_Bid=11999989.7 and
+   Top_Ask=11605642.8; other initial rows also have bid above ask. This is a
+   serious warning about mapping, price selection, or snapshot interpretation.
+   A conventional bid is the price you receive when selling immediately; an ask
+   is the price you pay when buying immediately. API transaction labels may be
+   written from a different perspective. Capture a response and compare its
+   levels with the corresponding in-game instant-buy/instant-sell quotes. Record
+   which API array represents each economic side, then select maximum bid and
+   minimum ask within those correctly identified arrays. Add a regression test.
+   Do not repair crossed books by taking abs(ask-bid) or silently swapping the
+   two existing columns: selecting the wrong extrema can discard the actual
+   best quotes, and the old CSV cannot recover discarded order levels.
+
+2. Your code downloads the endpoint response but stores only selected best-price
+   fields. The API documentation describes the summary arrays as the top 30
+   orders for each transaction type, not the complete exchange order book [1].
+   Neither these summaries nor one-minute differences are event-level OFI.
+   Multiple arrivals, cancellations, and trades can occur between observations.
+
+3. The pipeline makes a 70/30 chronological split, but train_data is never used
+   to fit a predictive model. It measures correlation on the final portion.
+   That is a held-out association test, not yet a trained forecasting system.
+
+4. Seconds_Since_Fetch measures successful endpoint fetches, not each item's
+   observation interval. If one item disappears for several responses, its next
+   row can still have a normal fetch gap. Compute per-item timestamp differences
+   as well, including the future endpoint used for every prediction label.
+
+5. The README's numeric results differ from the checked-in summary CSV. For
+   example, that CSV currently gives RECOMBOBULATOR_3000 correlation about -0.0882
+   and p about 0.0236. Tie future prose and charts to a frozen run identifier.
+   The present files may represent different runs; this guide does not resolve
+   their provenance by assuming either one is the authoritative experiment.
+
+6. A null result does not demonstrate that OFI decayed before the next minute,
+   or that millisecond data would necessarily produce predictability. Incorrect
+   mapping, weak effects, noisy measurements, limited power, and regime changes
+   are other possibilities. Treat the README's proposed explanation as a
+   hypothesis. Faster polling cannot recreate events omitted by the API.
+
+1. SEVERAL MORE WEEKS OF DATA
+============================
+What it means
+-------------
+Collect a longer continuous observation period so the study covers different
+days, activity levels, volatility conditions, and liquidity conditions. More
+rows can improve precision, but adjacent observations are dependent: 10,000
+one-minute rows are not necessarily 10,000 independent experiments. Seven items
+observed at the same time also share market conditions.
+
+How to implement it
+-------------------
+a. First correct and test the extraction semantics, then make raw-response
+   preservation and failure handling reliable. Otherwise weeks of collection
+   can produce irrecoverable or ambiguous data.
+b. Write an experiment configuration with the seven item IDs, intended 60-second
+   polling interval, start/end dates, quality rules, and an initial duration of
+   four to six weeks. This is a planning target, not proof of sufficient power.
+   At exactly one observation per minute, 28 uninterrupted days give 40,320
+   observations per item and 282,240 item rows across seven items, before any
+   filtering. Count distinct source updates separately from requests.
+c. Use an always-on machine or a scheduled background process with restart on
+   failure. On your Windows machine, a Task Scheduler task can invoke the
+   virtual environment's Python by absolute path and set the project working
+   directory. Avoid overlapping instances and arrange clean shutdown. Sleep,
+   network outages, disk capacity, and process crashes all affect coverage.
+d. Record UTC request-start and receipt times, source lastUpdated when provided,
+   response latency, request ID, and collector version. UTC prevents daylight
+   saving and local-clock ambiguity; source time helps identify cached updates.
+   Source time is not the time you actually knew the information: use receipt
+   time when deciding what a model or simulated trade could have known.
+e. Run a short pilot, then inspect one full day. Confirm reasonable spread
+   behavior, missing-item handling, no duplicate writer, and raw replay parity.
+   Once stable, let collection continue while developing analysis on frozen
+   earlier data. Separate exploratory data from a future confirmation window.
+f. Produce a daily quality summary: expected versus received polls, unique
+   source snapshots, rows per item, missing fraction, largest gap, stale-data
+   fraction, invalid books, and timestamp range. Distinguish process uptime,
+   successful HTTP responses, and usable market observations.
+g. Freeze the collection endpoint or a predeclared stopping rule. Do not keep
+   checking significance and stop the first time p drops below a threshold.
+   Use the power study in section 6 to justify additional collection prospectively.
+
+Done when
+---------
+A dated, frozen dataset has several weeks of measured coverage; outages and
+exclusions are quantified; and its raw inputs and collection configuration are
+identifiable. A calendar interval by itself is not a completeness guarantee.
+
+2. IMMUTABLE RAW DATA, CLEANED PARQUET, AND A DOCUMENTED SCHEMA
+===========================================================
+What it means
+-------------
+Raw data is the response as received, before your interpretation. Immutable
+means finalized raw files are never edited in place. Cleaned data is a derived,
+validated representation that can be rebuilt. Parquet is a typed, compressed,
+column-oriented format: analysis can read only relevant columns, while types
+such as UTC timestamps remain explicit [2]. A schema specifies field meaning,
+type, units, null rules, uniqueness, and validation constraints.
+
+Suggested layout (new paths to implement)
+----------------------------------------
+data/raw/date=YYYY-MM-DD/<request_id>.json.gz
+data/raw_manifests/date=YYYY-MM-DD.jsonl
+data/clean/schema_v1/date=YYYY-MM-DD/part-000.parquet
+data/quarantine/<clean_run_id>/rejected_rows.parquet
+docs/data_schema.md
+configs/study.toml
+results/<run_id>/manifest.json
+
+How to implement it
+-------------------
+a. Save original response bytes, optionally compressed without changing their
+   contents, plus metadata linking the request ID to receipt time, status,
+   source timestamp, content hash, and collector version. Do not store secrets
+   in request headers or logs. Archive non-JSON failures as diagnostic bodies
+   under a clearly separate convention, not as valid market snapshots.
+b. Write to a temporary file, flush and close it, then finalize within the same
+   filesystem using a unique destination. Never overwrite an existing request
+   ID. Append a manifest entry only after the payload is safely finalized;
+   a recovery check should detect orphan files or missing manifest targets.
+   Hashes detect changes; they do not prevent deletion, so keep a backup too.
+c. Put parsing in a pure function: parse_snapshot(payload, metadata) -> rows.
+   It should not fetch data, sleep, print, or write files. This is where the
+   verified API-side mapping lives. Sum quantity at the best price if multiple
+   returned entries represent that price and the API semantics require it.
+d. Define this initial cleaned observation schema:
+
+   request_id          string; required; links to one archived response
+   item_id             string; required; stable API product identifier
+   received_at_utc      UTC timestamp; required; information availability time
+   source_updated_at   UTC timestamp; nullable if unavailable
+   bid_price           float64; coins per item; positive for valid quotes
+   ask_price           float64; coins per item; positive for valid quotes
+   bid_size            int64; units at best bid; nonnegative; nullable if absent
+   ask_size            int64; units at best ask; nonnegative; nullable if absent
+   fetch_gap_seconds   float64; endpoint receipt gap; null for initial request
+   item_gap_seconds    float64; gap between this item's observations
+   source_hash         string; required; archived payload content identifier
+   quality_flags       list of strings; required, possibly empty
+   schema_version      string; required; initially "1"
+
+   Verify whether quantities are integral before enforcing int64. Use float64
+   for initial research calculations with documented tolerances. For execution
+   accounting, use decimal or scaled-integer coin values after verifying valid
+   precision. Do not infer a universal tick size from a few example prices.
+
+e. Enforce uniqueness on (request_id, item_id). Also identify repeated source
+   snapshots separately; retries can have different request IDs but the same
+   lastUpdated. Preserve requests in raw storage while using a documented
+   source-deduplication policy for analysis. A repeated source response is not
+   a new market event, and unchanged prices alone do not prove a stale response.
+f. Validate finite prices, nonnegative quantities, timestamps, expected fields,
+   and bid <= ask under the verified interpretation. Flag locked books
+   separately from crossed books. Quarantine malformed observations with a
+   reason and original reference. Do not silently turn missing sizes into zero
+   or forward-fill prices across outages to invent tradable observations.
+g. Write batch-sized Parquet partitions, initially one daily partition across
+   the seven items, using pandas plus PyArrow. Avoid a tiny file for every row.
+   Explicitly set the schema and test timestamp/type round trips. Rebuild into
+   a new dataset version if interpretation or cleaning policy changes.
+h. Preserve the old CSV as a legacy input with a hash and provenance note. Its
+   local timestamps lack timezone information: establish the actual collector
+   timezone before conversion, or mark the uncertainty. It contains no original
+   response bodies; exporting it to JSON would not make it raw API data. If the
+   original best levels were selected incorrectly, recollection may be needed.
+i. Store features and labels as separate derived artifacts, with feature version,
+   cleaning version, configuration, source manifest hash, and code commit. The
+   same frozen raw inputs should reproduce the same logical rows, even if file
+   compression metadata prevents byte-identical Parquet files across platforms.
+
+Done when
+---------
+You can delete a derived copy, rebuild it from frozen raw responses, and recover
+the same sorted rows and quality counts. Every result is traceable to its inputs.
+
+3. RETRY/BACKOFF, RATE LIMITS, STRUCTURED LOGGING, AND MONITORING
+=============================================================
+What it means
+-------------
+Retries recover transient failures. Backoff increases the delay between repeated
+attempts. Jitter randomizes that delay so clients do not retry simultaneously.
+Rate-limit handling respects the server's request budget. Structured logging
+records named fields instead of only free-form print statements. Monitoring
+turns those records into evidence that collection is healthy or needs attention.
+
+Your current 15-second timeout and broad exception handler are a useful start,
+but HTTP errors are not explicitly classified, JSON parsing happens immediately,
+and the loop always sleeps 60 seconds after work. The actual cadence is therefore
+request time plus processing time plus 60 seconds.
+
+How to implement it
+-------------------
+a. Separate fetch_once(), archive_response(), parse_snapshot(), and run_collector().
+   Use a requests.Session, explicit connection/read timeouts, and a shutdown
+   event. Inject the clock and sleep function so tests run without real waits.
+b. Classify errors before parsing market data. Retry connection timeouts and
+   selected transient server responses such as 502/503/504. Treat an unexpected
+   permanent client error as a configuration issue. Handle HTTP 429 explicitly;
+   the official API documents throttling responses [1]. Application-level
+   success=false also needs its own logged reason even if HTTP status is 200.
+c. Example policy: at most five attempts within a bounded retry time budget,
+   with random delay between zero and min(60, 2^attempt) seconds when there is
+   no server-directed delay. These are initial configuration choices. If the
+   server supplies Retry-After, honor its seconds or HTTP-date meaning. If its
+   required wait exceeds the retry budget, defer the next cycle accordingly;
+   do not shorten the server's wait to your local cap.
+d. Record available rate-limit headers, but do not assume every public endpoint
+   sends the same headers or permits the same rate. Recheck documentation and
+   observed responses before raising frequency. Source lastUpdated and payload
+   hashes reveal whether extra polls obtain any new information [1].
+e. Schedule against a monotonic clock so wall-clock adjustments do not distort
+   waits. If behind schedule, skip missed slots instead of issuing a burst of
+   catch-up requests. Log scheduled versus actual receipt time. Update separate
+   timestamps for last HTTP success and last usable fresh market observation.
+f. Emit JSON Lines logs with timestamp, severity, event, request_id, attempt,
+   status_code, latency_ms, rows_written, source_age_seconds, and error_type.
+   An event such as {"event":"fetch_failed","status_code":429,"attempt":2}
+   can be counted automatically. Rotate logs so collection cannot fill disk.
+g. Start monitoring simply: an atomically replaced heartbeat JSON and a daily
+   status report. Track last durable write, consecutive failures, disk space,
+   stale-source duration, and missing-item counts. An independent scheduled
+   checker must detect a stopped collector; a dead process cannot log its own
+   death. A local unhealthy status after five expected intervals is a reasonable
+   initial threshold to tune during the pilot. Notifications can be added later.
+h. Limit collection to one writer. Log unexpected exceptions with tracebacks;
+   don't retry programmer errors forever. On shutdown, close files and record
+   final status. On restart, recover incomplete writes and avoid duplicated
+   cleaned observations using request/source identifiers.
+
+Done when
+---------
+Mocked timeouts, 429s, malformed JSON, stale responses, and restarts recover or
+stop in a bounded, observable way without duplicate accepted observations.
+
+4. UNIT AND INTEGRATION TESTS WITH GITHUB ACTIONS
+==============================================
+What it means
+-------------
+A unit test checks a small piece of logic with known inputs and expected outputs.
+An integration test checks that several components work together. GitHub Actions
+automatically runs those checks on pushes and pull requests [3]. It should prove
+specific properties of this pipeline rather than just execute scripts once.
+
+How to implement it
+-------------------
+a. Move the collector's top-level infinite loop into main(), guarded by
+   if __name__ == "__main__". Do the same for the pipeline's file reads and
+   analysis. Importing a module must not contact the API or overwrite results.
+b. Create tests/fixtures/ with small recorded or synthetic responses: ordinary
+   book, empty side, missing item, duplicate price level, bad field type,
+   unsuccessful API response, and repeated source update. Remove secrets.
+c. Write hand-calculated OFI tests for rising, falling, and unchanged prices on
+   each side. For example, an unchanged bid rising from size 10 to 15 contributes
+   +5; an unchanged ask falling from 12 to 8 contributes -4 to ask pressure, so
+   OFI = 5 - (-4) = +9. An improved bid contributes its new size; a worsened bid
+   contributes minus its prior size. Test all branches and missing predecessors.
+d. Test item boundaries and time gaps. The first row of item B must never use
+   item A's state. A missing item across two otherwise successful polls must
+   break continuity. Removing an invalid middle observation must not cause a
+   shift to silently create a valid one-minute transition across the hole.
+e. Test labels and leakage with tiny dated examples: a five-minute target uses
+   the specified timestamp endpoint; a target crossing an outage is rejected;
+   no training label reaches into the next evaluation interval; and training
+   scaling is unchanged when extreme values are inserted into future test data.
+f. Test extraction against verified economic-side fixtures, including the
+   negative-spread failure mode observed in the existing CSV. Never define the
+   expected fixture values by calling the same extraction code being tested.
+g. Test retry logic with fake HTTP responses and a fake clock. Assert attempt
+   limits, honored server waits, no real sleeping, and eventual durable output.
+h. Integration test: fixture responses -> archived inputs -> cleaned Parquet ->
+   features -> chronological predictions -> metric files. Run in a temporary
+   directory. Check selected hand-known values, row counts, schema, provenance,
+   and no NaN/Infinity in required metrics. A separate fixture should cover the
+   no-valid-data and constant-series cases with explicit skipped-result reasons.
+i. Add .github/workflows/tests.yml. Configure push and pull_request triggers,
+   read-only repository permissions, checkout, setup-python for your documented
+   version, locked dependency installation, then python -m pytest. Use current
+   official GitHub examples when selecting action versions [3]. Keep network
+   access out of ordinary tests. An optional live API smoke test should be
+   separate, manually invoked, and unable to overwrite research data.
+j. Make CI emit its test report on failure. Start with one supported Python
+   version; Windows and Linux jobs are useful once packaging works, because you
+   develop on Windows. Do not require a week-long data collection to validate a
+   commit. Protect meaningful behavior rather than chasing a coverage number.
+
+Done when
+---------
+A fresh checkout passes deterministic offline tests, and deliberately breaking
+OFI signs, side mapping, gap detection, or split boundaries makes tests fail.
+
+5. A CLI INTERFACE AND REPRODUCIBLE ENVIRONMENT
+=============================================
+What it means
+-------------
+A command-line interface (CLI) exposes operations and configuration through
+documented commands. A reproducible environment specifies the interpreter,
+dependencies, data, configuration, and randomness needed to regenerate results.
+Pinned dependencies alone do not identify which dataset or settings were used.
+
+How to implement it
+-------------------
+a. Introduce a small package under src/bazaar_ofi/: collector.py, storage.py,
+   cleaning.py, features.py, validation.py, backtest.py, reporting.py, cli.py,
+   and __main__.py. Extract existing logic incrementally; don't build a framework.
+b. Use standard-library argparse initially. Give each operation --help, clear
+   input/output paths, useful errors, and nonzero exit status on failure.
+   These are proposed future commands, not commands that work today:
+
+   python -m bazaar_ofi collect --config configs/study.toml
+   python -m bazaar_ofi clean --config configs/study.toml --run-id clean-001
+   python -m bazaar_ofi validate --config configs/study.toml --run-id study-001
+   python -m bazaar_ofi backtest --run-id study-001
+   python -m bazaar_ofi report --run-id study-001
+
+c. Put paths, items, cadence, horizons, splits, seed, cleaning rules, and cost
+   assumptions in a versioned configuration file. Define precedence clearly:
+   explicit CLI arguments override the file, which overrides defaults. Save the
+   fully resolved configuration with each result. Keep secrets in environment
+   variables only if a chosen endpoint actually requires them.
+d. Add pyproject.toml with package metadata, a tested Python requirement, and
+   runtime versus development dependencies. Your requirements.txt already pins
+   packages; verify it installs in a clean environment rather than assuming it
+   does. Add PyArrow for Parquet and pytest for testing. Add model/bootstrap
+   libraries only if you actually use them; NumPy least squares is sufficient
+   for an initial one-feature regression.
+e. Choose and record one tested Python minor version and use it in CI. Generate
+   a lock or fully pinned requirements from a fresh environment, including
+   transitive dependencies and hashes where supported. Test the exact install
+   procedure. A random pip freeze from a heavily used environment is not a
+   substitute for defining the project's actual dependencies.
+f. A future Windows setup sequence can use py -m venv .venv, then invoke
+   .venv\Scripts\python.exe directly for pip installation and CLI commands.
+   Direct invocation avoids dependence on shell activation policies. Record
+   python --version; ensure it matches the supported version selected above.
+g. Save results/<run_id>/manifest.json containing code commit, dirty-worktree
+   status or patch identity, raw/clean manifest hashes, package versions, seed,
+   exact command, UTC run time, and configuration. Refuse accidental reuse of
+   an existing result directory. Keep outputs of different experiments separate.
+h. Include a tiny frozen fixture dataset for an offline reproduction command.
+   Give instructions for obtaining larger raw data without committing endless
+   snapshots to Git. Verify another environment can reproduce the fixture's
+   numeric outputs within stated tolerances. Containers are optional later.
+
+Current command clarification
+-----------------------------
+The actual scripts are under src, so from the repository root their paths are
+python src/bz_data_collector.py and python src/bz_ofi_pipeline.py. The README's
+bare filenames do not match the checked directory layout. Running the current
+pipeline writes its existing output paths; freeze inputs and preserve prior
+outputs before using it for comparisons.
+
+Done when
+---------
+A reader can install from a clean checkout, run the offline example, and identify
+exactly which inputs and configuration produced every output without editing code.
+
+6. WALK-FORWARD VALIDATION, HORIZONS, BASELINES, INTERVALS,
+   EFFECT SIZES, AND POWER
+========================================================
+This is the main research upgrade. Build it only after the observation semantics
+and chronology are trustworthy. Begin with a simple model whose behavior you can
+explain, then ask whether it improves on a deliberately simple alternative.
+
+6A. Features and targets: define the question precisely
+------------------------------------------------------
+Let b_t and a_t be best bid and ask, and qB_t and qA_t their sizes. Let m_t be
+(b_t+a_t)/2. Your existing OFI rule is equivalent to:
+
+bid contribution = I(b_t >= b_prev)*qB_t - I(b_t <= b_prev)*qB_prev
+ask contribution = I(a_t <= a_prev)*qA_t - I(a_t >= a_prev)*qA_prev
+OFI_t = bid contribution - ask contribution
+
+I(condition) equals 1 if true, otherwise 0. When a price is unchanged, the two
+terms give the size change. This is a snapshot-based proxy: it cannot reveal the
+sequence of events inside the polling interval. Positive OFI reflects greater
+bid-side pressure under the verified conventional book mapping.
+
+Define y(t,h) = 10000 * (m_(t+h)/m_t - 1), a future mid-price return in basis
+points (one basis point = 0.01%). Retain coin changes too, but returns ease
+comparisons across differently priced items. Evaluate items separately first.
+Do not pool raw item volumes and coin changes into one uninterpretable statistic.
+
+Start with horizons 1, 5, and 15 minutes, with one predeclared primary horizon.
+These are example choices, not evidence that these horizons contain a signal.
+Use actual timestamps: choose the first valid receipt at or after t+h within a
+fixed tolerance, such as 30 seconds, and save the actual elapsed horizon. Reject
+unmatched endpoints and paths crossing disallowed gaps. If using a regular
+minute grid instead, document binning and missingness without filling outages.
+Make sure endpoint selection never uses future observations as current features.
+
+Sort and validate each item, mark continuous segments, then compute lagged
+features and labels within segments. A 15-minute label needs an intact valid
+path, not merely two plausible endpoint prices. Save target_end_time explicitly.
+Feature construction must use only information received by the decision time.
+
+6B. Walk-forward validation
+--------------------------
+Meaning: repeatedly train using the past, freeze the fitted model, and evaluate
+on the next unseen time block. This tests whether a relationship survives as
+time advances. Random shuffling leaks future market conditions into training.
+
+Example for a six-week study:
+  Days 1-14: initial training/development period.
+  Train through day 14, evaluate days 15-21.
+  Train through day 21, evaluate days 22-28.
+  Train through day 28, evaluate days 29-35.
+  Reserve days 36-42 for a final confirmation after design choices are frozen.
+
+Use common UTC boundaries for all items. Expanding windows retain all history;
+rolling windows keep only a fixed recent duration. Pick one primary policy ahead
+of time. Earlier evaluation blocks may become training data for later fits once
+their labels have matured; their original predictions must remain unchanged.
+
+For each fold: select training rows, remove any whose target_end_time is at or
+after evaluation_start, fit training-only transformations and models, freeze
+them, and predict the evaluation rows. Save predictions with fold, item, horizon,
+feature time, label-end time, and training cutoff. Never include a final label
+that extends past the available/frozen data endpoint. Purge similarly at inner
+validation boundaries if tuning parameters or trading thresholds.
+
+TimeSeriesSplit offers ordered splits and a gap parameter [4], but a row gap is
+not automatically a time gap for irregular seven-item data. Explicit timestamp
+boundaries and label-end tests are easier to audit here. A 15-minute maximum
+horizon requires at least that much label separation at a fold boundary when
+applying a conservative shared purge, not an arbitrary one-row gap.
+
+For an initial model, standardize OFI using the training mean and standard
+deviation, then fit y = intercept + beta*z_OFI separately by item and horizon.
+Handle zero feature variance by falling back to an intercept-only prediction
+with a recorded reason. Winsorization, if used, also needs training-only cutoffs.
+More complicated models should be secondary experiments with their own tuning
+and honest evaluation budget.
+
+6C. Naive baselines
+-------------------
+Meaning: simple predictions that reveal whether extra complexity adds value.
+
+Implement these on identical evaluation rows and horizons:
+  - Zero return: predict no mid-price change (price persistence).
+  - Training mean: predict that item's average training return for the horizon.
+  - A simple past-return model: fit future return against a lagged return using
+    the same training policy; never use future movement as its input.
+  - Optional static depth imbalance, (qB-qA)/(qB+qA), as a competing observable
+    feature. It measures current book asymmetry, unlike changes captured by OFI.
+
+For every model save MAE, MSE, and out-of-sample R-squared relative to a named
+baseline: 1 - sum((y-prediction)^2)/sum((y-baseline_prediction)^2). Negative values
+mean the model loses to that baseline. Report an undefined value with a reason
+if the denominator is zero. Direction accuracy is secondary and needs a stated
+rule for zero returns and class imbalance. A constant prediction has undefined
+correlation; do not convert that to a fabricated meaningful correlation value.
+
+6D. Bootstrap confidence intervals
+---------------------------------
+Meaning: estimate uncertainty by repeatedly resampling data and recomputing a
+statistic. A 95% interval is a procedure designed for approximately 95% coverage
+across repeated comparable samples under its assumptions; it is not a promise
+about performance in the next market regime.
+
+Independent row resampling is inappropriate when neighboring observations are
+dependent and multi-minute labels overlap. Use contiguous time blocks so local
+dependence is preserved. Moving, circular, and stationary block bootstraps are
+documented alternatives [5]. A straightforward first implementation resamples
+fixed-duration contiguous blocks from each valid evaluation segment.
+
+Resample tuples containing the actual target, OFI, model prediction, and baseline
+prediction together. Never resample those columns independently. For an aggregate
+across items, resample common time blocks across all items to retain shared
+shocks. Avoid blocks that bridge outages or independently fitted fold boundaries.
+
+Use a fixed seed and, for example, 2,000 replicates initially; check that interval
+endpoints are stable enough with more replicates. Choose block duration using
+training-period dependence diagnostics and the maximum overlapping horizon.
+Check a prespecified range, such as 30, 60, and 120 minutes, rather than choosing
+the one with the nicest interval. These durations are examples to validate, not
+universal optimal settings. Very few effective blocks mean weak inference.
+
+Compute paired improvement per row, d_t = baseline squared error - model squared
+error; positive mean(d_t) favors OFI. Bootstrap the mean difference, OFI/target
+correlation, and other primary metrics. Report the 2.5th and 97.5th percentiles
+as pointwise intervals. Fixed-prediction resampling describes uncertainty in
+these held-out predictions; it does not include all uncertainty from refitting
+or selecting the model. A more expensive full-pipeline study must rerun those
+steps within an appropriate chronological resampling/simulation design.
+
+Do not treat the fraction of ordinary bootstrap estimates above zero as an
+automatically valid p-value: a test needs a justified null-centered construction.
+Dependence-aware intervals should replace overconfidence in the current default
+Pearson p-values, whose usual reference calculation does not account for these
+time-series complications.
+
+6E. Effect sizes and multiple comparisons
+---------------------------------------
+Meaning: an effect size describes how large a relationship is, while a p-value
+does not measure practical value. Report held-out correlation with uncertainty,
+predicted basis points for a one-training-standard-deviation OFI move, MAE/MSE
+improvement, and net simulated returns after costs. A statistically detectable
+effect can still be too small to trade.
+
+Seven items times three horizons produce at least 21 comparisons. Models,
+thresholds, feature variations, and repeated peeking can expand that family.
+Predeclare primary tests and separate exploratory results. If using Bonferroni
+for 21 valid p-values, alpha=0.05 gives a threshold about 0.00238. Correcting
+invalid time-series p-values does not make them valid. Pointwise 95% intervals
+are also not simultaneous familywise intervals; label them accordingly and use
+adjusted intervals or a justified joint block-bootstrap method for familywise
+claims. Do not cherry-pick the best item/horizon after looking at all outcomes.
+
+6F. Power analysis
+------------------
+Meaning: statistical power is the chance that a specified test detects an effect
+of a chosen size if it exists. It helps answer whether a negative result rules
+out a useful effect or whether your measurement is simply too imprecise.
+
+Before the final test, specify a minimum relevant effect, such as a correlation
+of 0.05, a chosen reduction in forecast error, or a net-return improvement above
+costs. Those are different targets and need different power calculations. Choose
+alpha after accounting for the primary test family, and a target such as 80%.
+
+For rough orientation only, an independent-observation Fisher-z approximation
+for testing correlation zero is:
+
+  n ~= 3 + [(z_(1-alpha/2) + z_power) / atanh(r_min)]^2
+
+At two-sided alpha=0.05, 80% power, and r_min=0.05, this is about 3,140 independent
+paired observations. Correcting 21 comparisons raises it to roughly 6,000.
+These are illustrative approximations, not required minute-row counts for this
+dataset: serial dependence, overlapping returns, missingness, and the test
+actually used can materially change power.
+
+Prefer a simulation calibrated on development data. Preserve plausible feature
+dynamics and dependent noise; inject a known coefficient into a synthetic return
+process; construct all horizons from that same process so overlapping targets
+remain coherent. For each candidate duration and effect size, generate many
+datasets, rerun the planned chronological evaluation and corrected inference,
+and count detections. Include zero-effect simulations to check false positives.
+Use the resulting power-versus-duration curve to choose a feasible study length.
+Record simulation assumptions and Monte Carlo uncertainty in the detection rate.
+
+If resources limit collection, report the minimum detectable effect or interval
+width achievable at your duration. Do not report post-hoc "observed power" based
+on the noisy measured effect as if it adds evidence to a nonsignificant result.
+
+Done when for section 6
+----------------------
+You have timestamp-audited folds, saved truly chronological predictions,
+baseline comparisons, dependence-aware intervals, meaningful effect sizes, a
+documented multiplicity policy, and a prospective sensitivity/power analysis.
+
+7. A COST-AWARE OR SPREAD-AWARE BACKTEST, REGARDLESS OF CONCLUSION
+==============================================================
+What it means
+-------------
+A backtest simulates a fully specified decision rule on historical information.
+The spread is ask minus bid. Immediate purchases pay the ask and immediate sales
+receive the bid, so a strategy can predict mid-price movement and still lose.
+Fees, slippage, latency, capital limits, and unavailable liquidity matter too.
+This is an illustrative market-feasibility experiment, not evidence of fills
+that actually occurred.
+
+How to implement it
+-------------------
+a. Use only the walk-forward predictions already produced. Choose the signal
+   threshold, holding horizon, trade size, and costs using training/development
+   data, then freeze them for the next evaluation block. Do not tune the rule
+   against the final backtest profit curve.
+b. Start with a long-or-flat rule: buy a small quantity only if the predicted
+   rise exceeds the estimated spread/fees plus a declared safety margin; exit
+   after the chosen holding duration. A negative signal means stay flat. Do
+   not assume shorting or unlimited borrowed inventory is available.
+c. Make decision and execution timing explicit. Compute the signal after its
+   source response is received. For a conservative snapshot convention, enter
+   at the next valid observable ask after a declared latency; exit at a later
+   observed bid after the holding period measured from actual entry. Align the
+   forecasting target to this delayed-entry use case or clearly state that the
+   research mid-return target and executed holding window differ.
+d. For quantity q, with fractional entry and exit fees f_in and f_out:
+
+   cost     = q * entry_ask * (1 + f_in) + entry_slippage_coins
+   proceeds = q * exit_bid * (1 - f_out) - exit_slippage_coins
+   net_PnL  = proceeds - cost
+
+   Bid/ask execution already includes the spread; do not subtract it twice.
+   For an artificial example, buying at 101 and later selling at 100 loses one
+   coin per unit before fees, regardless of what the midpoint did in between.
+   Determine applicable Bazaar fees and account assumptions from authoritative
+   current rules before assigning a realistic rate. Until verified, report
+   explicit scenario rates rather than presenting one invented fee as fact.
+e. Bound q by both available cash and a conservative fraction of displayed
+   executable-side size. If using archived depth, walk the visible levels to
+   estimate a volume-weighted price; liquidity beyond returned summaries is
+   unknown. A top-of-book fill model does not support unlimited trade size.
+f. Maintain a chronological cash/inventory ledger. Begin with one position per
+   item and prohibit overlapping entries while it is open. Enforce a shared
+   capital budget across items and a deterministic tie-break for simultaneous
+   signals. Negative cash, selling unowned units, or reusing committed capital
+   must fail validation.
+g. Define missing-exit behavior before testing. For example, keep inventory
+   until the next observable valid quote, flag the delay, and disclose the
+   additional exposure. At the dataset end, report any unliquidated inventory
+   separately with a stated valuation convention. Do not delete losing or
+   inconvenient positions because their exits are missing.
+h. Stress-test wider spreads, extra slippage, longer latency, and smaller size
+   limits. Even next-snapshot prices are hypothetical executable quotes;
+   one-minute observations cannot prove continuous availability. Passive limit
+   order strategies additionally require queue/fill assumptions that these
+   snapshots cannot validate. Keep those out of the primary backtest.
+i. Report trade count, exposure, turnover, gross/net profit, maximum drawdown,
+   per-trade distribution, results per fold/item, and sensitivity to costs.
+   Compare with cash/no-trade and an equally specified simple long strategy.
+   Use daily marked portfolio returns or common time blocks for uncertainty,
+   not an independence assumption over overlapping trades. Avoid impressive
+   annualized ratios from a few weeks without a strong justification.
+j. Save trades.csv and equity_curve.csv with signal receipt, execution times,
+   quantities, prices, fee assumptions, model/fold ID, and reason codes. Add
+   hand-calculated ledger tests: a flat-price round trip loses spread and fees;
+   no signal means no trades; insufficient cash prevents an entry.
+
+Done when
+---------
+Every simulated trade can be replayed, costs and timing are explicit, and both
+profitable and unprofitable outcomes are reported under the same assumptions.
+If the model adds no forecasting value or never clears costs, say so directly.
+
+8. A POLISHED 4-6 PAGE PAPER OR TECHNICAL REPORT
+==============================================
+What it means
+-------------
+Write a compact research argument: question, measurement, method, evidence, and
+limitations. A technical report is sufficient; do not imply peer review or
+publication. The report should let another reader assess what your experiment
+does and does not establish without reverse-engineering your scripts.
+
+Suggested six-page allocation
+-----------------------------
+Page 1: Title, short abstract, motivation, precise primary question, and the
+        contribution of studying observable Bazaar snapshots.
+Page 2: API and data collection, dates, items, actual cadence, source freshness,
+        verified quote semantics, missingness, and cleaning rules.
+Page 3: Snapshot OFI formula, return horizons, chronological split diagram,
+        baselines, model, multiplicity policy, and inference procedure.
+Page 4: Held-out effects and forecast performance, confidence intervals,
+        sample/block counts, and consistency or instability across folds.
+Page 5: Backtest rule, execution/cost assumptions, outcomes, and sensitivity.
+Page 6: Limitations, power interpretation, conclusion, and concise references
+        plus a reproducibility link. Use an appendix if details exceed the limit.
+
+How to implement it
+-------------------
+a. Freeze one run directory and generate every table and chart from its outputs.
+   Have a reporting command read the run manifest. Export a small machine-readable
+   summary so updating numbers never depends on retyping them from a console.
+b. Prioritize four charts: a coverage/gap view; a walk-forward timeline; a forest
+   plot of effects with intervals by item/horizon; and a net equity/cost-sensitivity
+   plot. Include a compact model-versus-baseline table. Replace the current
+   p-value volcano plot as the main result figure with one showing magnitude and
+   uncertainty; the volcano plot can remain a secondary descriptive figure.
+c. Label axes and units, actual date ranges, sample counts, confidence-interval
+   method, and whether intervals are pointwise or adjusted. Use readable fonts
+   at final page size and captions that explain the finding and caveat. Figures
+   should remain understandable in grayscale where practical.
+d. Distinguish measured results from explanations. Suitable wording after a
+   negative study is: "Under the specified sampling, models, and evaluation
+   windows, we found no robust incremental predictive value over the baselines."
+   Add what the intervals rule out and what they cannot rule out. Do not write
+   that the signal necessarily disappears in milliseconds or that OFI never works.
+e. Discuss limited history, regime dependence, source caching, truncated book
+   summaries, snapshot/event differences, uncertain legacy mapping, missingness,
+   selection of seven items, overlapping labels, model selection, and simulated
+   execution. Separate limitations that were fixed from those that remain.
+f. Include a reproducibility statement: code commit, dataset manifest/version,
+   environment lock, exact commands, random seeds, and data availability. Report
+   exclusions and exploratory choices as well as the primary specification.
+g. Write the abstract last. It should state the date range, observation count,
+   method, principal effect with uncertainty, and qualified conclusion. Ask a
+   technically informed reader to reproduce the small example and identify any
+   claim that the evidence does not support before finalizing the report.
+
+Done when
+---------
+The 4-6 page report matches one frozen run, all figures regenerate, limitations
+are specific, and a reader can trace its central claims to data and methods.
+
+RECOMMENDED IMPLEMENTATION ORDER
+===============================
+Milestone 1: Verify quote semantics; preserve legacy data; refactor import-safe
+functions; add extraction/OFI tests; implement raw archival and bounded retries.
+Milestone 2: Validate a day of collection, launch the multiweek run, add daily
+quality monitoring, and document schema and gap/staleness policies.
+Milestone 3: Build deterministic raw-to-Parquet replay, package the CLI, pin and
+verify the environment, and make offline integration tests pass in Actions.
+Milestone 4: On development data, implement timestamp labels, walk-forward
+models, baselines, paired block intervals, and prospective power simulations.
+Freeze primary hypotheses and reserve future confirmation data.
+Milestone 5: Implement and test the cost-aware ledger. Evaluate frozen rules,
+archive predictions/trades, and report all planned item/horizon results.
+Milestone 6: Freeze the final run and produce the report and reproduction guide.
+
+Keep the first version modest: seven items, three prespecified horizons, a linear
+OFI model, a few baselines, and a long-or-flat backtest. Add complexity only when
+it answers a specific question that the simpler version cannot answer.
+
+PRIMARY DOCUMENTATION AND FURTHER READING
+=======================================
+The implementation details above are project-specific recommendations, not claims
+that these features already exist. Online documentation consulted September 8,
+2026; recheck service policies and package interfaces when implementing.
+
+[1] Hypixel Public API, Bazaar endpoint and response/throttling documentation:
+    https://api.hypixel.net/
+    Use this to verify response fields and service behavior. Also validate the
+    economic book-side interpretation against a concrete quote example.
+[2] Apache Arrow, Reading and Writing the Apache Parquet Format:
+    https://arrow.apache.org/docs/python/parquet.html
+[3] GitHub Docs, Building and testing Python:
+    https://docs.github.com/en/actions/tutorials/build-and-test-code/python
+[4] scikit-learn, TimeSeriesSplit:
+    https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html
+[5] arch, Time-series Bootstraps:
+    https://arch.readthedocs.io/en/stable/bootstrap/timeseries-bootstraps.html
+
+The statistical examples and implementation policies in this guide are proposed
+study choices. No power simulation, new backtest, or new empirical result was
+executed as part of writing this file.

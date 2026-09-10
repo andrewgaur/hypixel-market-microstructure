@@ -1,0 +1,125 @@
+FIX THE ANALYSIS YOURSELF: A SHORT BEGINNER GUIDE
+================================================
+Work in src/bz_ofi_pipeline.py. Make one change at a time and check a tiny example
+before running the whole dataset. You do not need the generated analysis2 code.
+
+1. Preserve a starting point.
+   Save a backup or Git commit of the original script. Keep data/bazaar_data.csv
+   unchanged. Send your new outputs to a separate results folder so you can
+   distinguish old results from your revised analysis.
+   - DONE
+
+2. Resolve the input problem first.
+   A bid is the price an immediate seller receives; an ask is the price an
+   immediate buyer pays. The existing data has bids above asks. Verify the API
+   arrays and best-price selection against actual quotes before collecting new
+   data. Do not simply swap CSV columns: discarded levels cannot be recovered.
+   Guide 01 explains this prerequisite. Until valid data exists, learn using a
+   few artificial rows labeled as examples, not real research observations.
+   - DONE
+   - fixed. buy_summary and sell_summary are switched/counterintuitive, which
+   was the cause of the issue.
+
+3. Put the program inside main().
+   Leave imports and reusable functions outside it. Move file reading, analysis,
+   and plotting inside a function named main, then finish the file with:
+       if __name__ == "__main__":
+           main()
+   This lets tests import your calculations without running the entire program.
+
+4. Parse and check the observations.
+   Convert Timestamp to a real datetime column. Establish the collector's actual
+   timezone before converting local times to UTC. Sort by item and time. Flag
+   duplicate item/times, missing or nonfinite values, nonpositive prices,
+   negative quantities, and bid > ask. Keep counts and rejection reasons.
+   A timestamp you cannot place safely needs investigation, not a guessed date.
+
+5. Fix continuity BEFORE deleting bad rows.
+   For each item, calculate elapsed seconds since its previous observation.
+   Seconds_Since_Fetch alone misses occasions when only one item disappears.
+   Start a new continuous segment after an excessive gap or invalid observation.
+   A segment is simply a numbered uninterrupted stretch of usable observations.
+   Calculate shifts within both item AND segment so they cannot bridge a hole.
+   Check: remove one minute from a tiny example; no feature or label should
+   silently cross that missing interval.
+
+6. Check OFI with arithmetic you can do on paper.
+   Your existing calculate_ofi formula need not be replaced just for appearance.
+   With unchanged prices, bid size 10 -> 15 gives +5; ask size 12 -> 8 gives -4;
+   OFI = 5 - (-4) = 9. Check rising and falling prices separately too. The first
+   row of each segment has no predecessor, so it must not get a usable OFI.
+   Call this snapshot OFI: you cannot observe events between API responses.
+
+7. Define the future outcome precisely.
+   Midpoint = (bid + ask)/2. Begin with a one-minute horizon. Find the first
+   observation at or after time t plus 60 seconds, within a stated tolerance
+   such as 30 seconds, and inside the same segment. Save its timestamp and the
+   actual elapsed time. A next-row shift alone does not guarantee one minute.
+   Future return in basis points = 10000 * (future_mid/current_mid - 1).
+   Example: 1000 -> 1001 is 10 basis points. Never use this future value as a
+   feature available at time t.
+
+8. Make the training portion do real work.
+   Start with one shared chronological cutoff across items. Fit a simple line
+   separately per item on earlier rows: predicted_return = intercept + beta*OFI.
+   Fit only rows whose future outcome is known BEFORE the test starts. A feature
+   before the cutoff whose target ends after it must be removed from training.
+   This is called purging. If standardizing OFI, calculate its mean and standard
+   deviation from training only. Freeze the fitted rule and predict later rows.
+   Once one split works, repeat with expanding training and later test windows:
+   that is walk-forward validation. Guide 06 gives the longer explanation.
+
+9. Compare with a simple alternative.
+   Predict zero future return and the mean training return as two baselines.
+   On identical held-out rows, calculate mean absolute error (average absolute
+   mistake) and mean squared error (average squared mistake). Smaller is better.
+   Keep correlations separate for each item; don't pool raw coin changes across
+   differently priced items. If data is constant or too short, record "undefined"
+   or "insufficient data" rather than inventing a zero correlation.
+
+10. Fix how uncertainty is reported.
+    The usual Pearson p-value assumes conditions this dependent time series may
+    violate. Initially report descriptive correlations and errors without a
+    significance claim. Next, follow guide 06 to resample contiguous time blocks
+    of paired features, outcomes, and predictions for confidence intervals.
+    More bootstrap draws do not create more independent history. Pointwise 95%
+    intervals are not simultaneous 95% intervals across all items/horizons.
+    Add multiple horizons and formal inference only after the simple version
+    and its timing checks work.
+
+11. Save evidence and write a restrained conclusion.
+    Save held-out predictions, fold boundaries, row counts, exclusions, settings,
+    input fingerprint, and code version beside each chart. Generate summaries
+    from that same run. A null result does not prove minute sampling caused it
+    or that millisecond observations would fix it. Say what your experiment
+    measured and what remains uncertain.
+
+Your first small session:
+Do steps 1 and 3, then hand-check the OFI example in step 6. Next address input
+semantics and continuity. Save sophisticated statistics for after those basics.
+Use guide 04 when you are ready to turn the hand checks into automated tests.
+
+OPTIONAL CLEANUP OF THE GENERATED VERSION
+You can remove the following without affecting the original collector/pipeline:
+  src/bz_ofi_analysis2.py
+  requirements-analysis2.txt
+  results/analysis2/                 generated diagnostics and synthetic demo
+  results/next/analysis2_fixes_and_usage.txt
+
+Also remove tests/test_bz_ofi_analysis2.py if you remove the script: that test
+file imports it. tests/fixtures/synthetic_quotes.csv is an optional artificial
+example; keep it for practice or remove it too. Delete the entire tests folder
+only if it still contains solely those generated files and disposable caches.
+
+.venv-analysis2/ is safe to delete, but it contains the libraries installed for
+the previous work. Keep it temporarily if you want a ready-to-use environment
+for editing the original pipeline, or create your own environment and install
+the project's dependencies before removing it. Its name does not restrict it
+to running analysis2. Close processes using its Python before deleting it.
+
+Keep src/bz_ofi_pipeline.py, src/bz_data_collector.py, data/, requirements.txt,
+and the ranked guides/all-next.txt. Earlier guides contain optional analysis2
+examples; those particular commands stop working if you remove that script.
+The .venv-analysis2/ ignore entry becomes harmless if that folder is removed;
+you can remove just that entry later. Keep results/next/ ignored if you still
+want these notes local. No cleanup is performed by this guide.

@@ -1,0 +1,80 @@
+RANK 4 OF 8: UNIT TESTS, INTEGRATION TESTS, AND GITHUB ACTIONS
+==========================================================
+Why fourth
+----------
+Small correctness tests begin with rank 1. This rank is the complete testing
+workflow and automatic checking, which protects the project as it grows while
+collection is running. It is a strong learning investment because it teaches
+you to specify what correct behavior actually means.
+
+Concepts from the beginning
+---------------------------
+A test calls code with known inputs and checks the result. An assertion says
+"this must be true." A unit test isolates one calculation. An integration test
+checks several components working together. A fixture is a reusable example
+input. A mock or fake replaces something external, such as HTTP or a clock.
+
+Continuous integration (CI) runs checks automatically on code changes. GitHub
+Actions is GitHub's system for defining these runs in a YAML file. YAML is a
+configuration text format whose indentation expresses structure. A workflow
+starts on an event; a job runs on a fresh machine; steps install and test code.
+
+Step-by-step implementation
+---------------------------
+1. Run the tests supplied with this delivery from the repository root:
+   .\.venv-analysis2\Scripts\python.exe -m unittest discover -s tests -v
+   unittest is included with Python. You do not need pytest to run these tests.
+   Read the test names: they tell you which behavior is being protected.
+2. Open tests/test_bz_ofi_analysis2.py. A test method creates a tiny input, calls
+   a function, then asserts the expected result. Start with the hand-calculated
+   OFI tests before reading the longer integration test.
+3. Work through an example: bid price unchanged, size rises 10 to 15, contribution
+   +5; ask unchanged, size falls 12 to 8, contribution -4; OFI is 5-(-4)=9.
+   Write this expected value directly. Do not calculate "expected" by calling
+   the same OFI function, because a shared bug would make that test pass.
+4. Add fixtures for every verified collector-side mapping case, including
+   empty sides and repeated prices. Keep fixtures small and clearly labeled
+   synthetic or recorded; do not confuse artificial examples with real evidence.
+5. Add one test for each bug you fix: a missing item despite normal endpoint
+   gaps; an invalid row between two good rows; duplicate timestamps; a label
+   reaching across a fold boundary; a constant price/feature series; and a
+   requested horizon with no nearby valid endpoint.
+6. Test chronology explicitly. Change future test feature values to enormous
+   numbers and verify the earlier fitted training parameters remain unchanged.
+   Chronological sorting alone does not prove training has avoided leakage.
+7. Write a collector integration test with fake HTTP -> saved response -> parsed
+   table. Then extend it to raw -> Parquet -> features -> result files. Use a
+   temporary directory so test runs cannot overwrite your research dataset.
+8. Test bad paths too. A network timeout should exercise recovery, a corrupt
+   CSV should produce a clear failure, and an existing output directory should
+   not be overwritten. The provided analysis tests already cover the latter.
+9. Create .github/workflows/tests.yml when ready. Use push and pull_request
+   triggers, permissions: contents: read, a runner, checkout, setup-python for
+   the supported interpreter, then install requirements-analysis2.txt and run
+   python -m unittest discover -s tests -v. Use the current official examples:
+   https://docs.github.com/en/actions/tutorials/build-and-test-code/python
+10. Keep ordinary CI offline after dependency installation. Do not run the live
+    infinite collector in a test job or depend on today's API prices. A separate
+    manually triggered live smoke test can check connectivity later.
+11. Push a small branch and inspect the Actions result. To prove CI checks
+    something meaningful, temporarily break an expected OFI value on that branch,
+    confirm the test fails, then fix it before merging. Start with one Python
+    version; add Windows/Linux jobs when the baseline workflow is dependable.
+
+Common mistakes
+---------------
+Passing tests do not prove every possible behavior is correct. Coverage is a
+measure of executed code, not the quality of expected values. Tests that only
+check "a file exists" miss incorrect results inside the file. Tests that contact
+the live API can fail for reasons unrelated to your change.
+
+Current script connection
+--------------------------
+Offline unit and integration tests are included for analysis2. No GitHub workflow
+has been added by this guide. Collector archival/retry/Parquet tests will need
+to accompany the future implementations of those features.
+
+Completion checkpoint
+---------------------
+A fresh checkout runs meaningful tests automatically, and intentional mistakes
+in signs, gaps, or chronological splits are detected before they reach results.

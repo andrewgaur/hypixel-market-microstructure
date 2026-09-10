@@ -1,0 +1,152 @@
+RANK 6 OF 8: WALK-FORWARD VALIDATION, HORIZONS, BASELINES,
+             BOOTSTRAP INTERVALS, EFFECT SIZES, AND POWER
+=======================================================
+Why sixth
+---------
+This is the main analysis task and the steepest conceptual step. Reliable data
+and small tested functions make it much easier to learn. Read the design portion
+before collecting the final data; implement progressively while collection runs.
+
+Start with the question
+-----------------------
+A feature is information available when making a prediction. Here it is OFI,
+a number describing changes in the best displayed bid and ask. A target is the
+future outcome you want to predict. A model is a rule fitted from past examples
+to turn a feature into a predicted target. Training fits that rule. Testing
+checks it on later observations that did not participate in the fit.
+
+The midpoint is (bid+ask)/2. It is a reference price, not necessarily a price you
+can trade at. A return is proportional price change. A 0.01% return is one basis
+point, abbreviated bp. If the midpoint moves from 1,000 to 1,001, the return is
+0.1%, or 10 bp. Expressing changes in bp makes differently priced items easier
+to compare, but it does not make their observations independent.
+
+Snapshot OFI uses changes between observations. It cannot tell whether a size
+change came from trades, cancellations, or several offsetting events. Do not
+describe it as a complete record of actual order flow inside each minute.
+
+Part A: Build features and labels in small steps
+----------------------------------------------
+1. On paper, take three valid observations for one item. Calculate OFI between
+   the first and second and the midpoint change between the second and third.
+   The feature is known at the second observation; the target is known later.
+   If the target occurs before the feature is available, your timing is wrong.
+2. Mark gaps, invalid quotes, and duplicate timestamps before dropping rows.
+   Divide each item into continuous valid segments. Only calculate features
+   and labels inside a segment. Deleting a bad row first can make its neighbors
+   look artificially adjacent.
+3. Define one-, five-, and fifteen-minute horizons as initial study choices.
+   Pick one primary horizon before examining final outcomes. A horizon means
+   elapsed time, not a row count when sampling is irregular.
+4. For each feature time t, find the first observation at or after t+h, and
+   accept it only within a predeclared tolerance. Record actual elapsed time.
+   analysis2 defaults to 30 seconds of tolerance and rejects paths across gaps.
+   A 15-minute target requires a continuous usable path, not just two endpoints.
+
+Part B: Learn chronological evaluation
+-------------------------------------
+5. A random split mixes past and future. Use a calendar split: for example,
+   fit using two weeks, predict the next week, then expand training and predict
+   the following week. This is walk-forward validation. Common UTC boundaries
+   across items make the evaluation periods comparable.
+6. Remove training examples whose future target reaches the test period. This
+   is called purging. A feature at 11:55 with a 15-minute target is not a fully
+   known training example for a test beginning at noon. Require its label-end
+   timestamp to be strictly earlier than the test start.
+7. Fit a simple line: predicted_return = intercept + beta * standardized_OFI.
+   The intercept is the typical training return; beta is the fitted change in
+   predicted bp for one training standard deviation of OFI. Standard deviation
+   measures variation. Calculate the mean and standard deviation on training
+   data only; use those same values to transform test observations.
+8. Start with one item and horizon. Inspect a saved fold: latest training label
+   precedes the test start, predictions only use earlier fitting, and each
+   item/time/horizon receives at most one held-out prediction. Then expand.
+9. If tuning settings, do it in earlier training/validation windows, not on the
+   final test. Trying many settings and keeping the best test score is another
+   way of training on the test set. Reserve genuinely future confirmation data.
+
+Part C: Compare with simple baselines
+-------------------------------------
+10. A baseline is a simple competing forecast. Compare OFI against predicting
+    zero return, predicting the mean training return, and a simple fitted rule
+    using the most recent known return. Use exactly the same test rows for all.
+11. MAE is mean absolute error: average size of a prediction mistake. MSE is
+    mean squared error: squaring emphasizes large mistakes. Smaller is better.
+    If baseline MSE is 4 and model MSE is 3, the improvement is 1 bp squared.
+    Out-of-sample R-squared relative to that baseline is 1-3/4=0.25. It can be
+    negative when the fitted model is worse than the simple prediction.
+12. Correlation measures linear association, between -1 and +1. Positive OFI/
+    return correlation means larger OFI tends to accompany larger future returns.
+    It does not establish useful prediction error reduction or net trading gains.
+    Correlation is undefined for a constant variable; don't turn that into zero.
+
+Part D: Understand uncertainty
+------------------------------
+13. An estimate from one sample will differ from another sample. A confidence
+    interval summarizes uncertainty using a procedure with a stated coverage
+    goal. A 95% interval does not guarantee future-market outcomes or assign a
+    95% probability to a fixed parameter under the usual frequentist reading.
+14. A bootstrap repeatedly resamples the observations and recalculates the
+    statistic. For time series, resample chunks of neighboring times together
+    so local dependence survives. Never independently resample the OFI and
+    target columns, which would destroy the relationship you are measuring.
+15. Start with a paired block bootstrap of the saved held-out predictions and
+    targets. Keep blocks inside uninterrupted segments and fitted folds. Choose
+    block duration from development-period dependence and the longest horizon;
+    check prespecified alternatives. More bootstrap repetitions reduce numerical
+    simulation noise; they do not create additional historical information.
+16. analysis2 uses nonoverlapping elapsed-time blocks, 2,000 repetitions, and
+    a default 60-minute block duration. It withholds intervals with fewer than
+    10 blocks. Ten is a conservative software minimum, not a guarantee of valid
+    inference. Its intervals are conditional on saved models and pointwise.
+    They do not incorporate all model selection/refitting uncertainty. Read:
+    https://arch.readthedocs.io/en/stable/bootstrap/timeseries-bootstraps.html
+17. For baseline comparison, resample paired error differences. Positive
+    baseline_squared_error - model_squared_error means OFI did better. An
+    interval spanning zero leaves the direction uncertain under that procedure.
+    It does not prove exact equality. Assess whether the interval is narrow
+    enough to rule out an improvement you would actually care about.
+
+Part E: Multiple comparisons and effect sizes
+--------------------------------------------
+18. Testing seven items at three horizons involves at least 21 comparisons.
+    Some apparently unusual results occur by chance when you search many
+    combinations. Predeclare which comparisons are primary and report all of
+    them. Additional models, thresholds, and repeated looks expand the search.
+19. An effect size says how large the relationship is: correlation, beta in bp,
+    reduction in error, or net return. A p-value concerns incompatibility with
+    a specified null model; it is not the probability the null is true and not
+    the size or importance of an effect. The old iid Pearson p-values do not
+    account for this series' dependence. analysis2 deliberately omits them.
+20. Pointwise 95% intervals do not provide joint 95% coverage for 21 claims.
+    analysis2 labels them as exploratory and makes no corrected-significance
+    claim. For a formal study, implement a justified dependence-aware test
+    with a declared multiplicity correction or simultaneous intervals. Applying
+    Bonferroni to an invalid base p-value does not repair its assumptions.
+
+Part F: Power analysis, before the final test
+-------------------------------------------
+21. Power is the chance your test detects an effect of a specified size when
+    that effect exists. Choose a minimum useful effect and a target such as
+    80% power before looking at final results. "More weeks" is a collection
+    plan; power analysis asks whether that plan is informative enough.
+22. For orientation, analysis2 writes an independent-observation Fisher-z
+    calculation for a minimum correlation, adjusted for the planned family.
+    Read its assumption label: independent pairs are not minute rows. It is
+    not a completed time-series power analysis and not observed power.
+23. Implement a simulation on development data: model plausible dependent noise
+    and feature behavior; inject a known signal into a synthetic return process;
+    construct overlapping horizons coherently from that process; then run the
+    same folds and planned inference repeatedly at different collection lengths.
+24. Count the fraction of simulated datasets detecting the injected effect.
+    Repeat with zero effect to check false-positive control. Plot power versus
+    duration, include simulation uncertainty, and document assumptions. If the
+    zero-effect false-positive rate is too high, fix inference before using
+    its advertised power. Do not select a duration based on final-test luck.
+
+Completion checkpoint
+---------------------
+You can explain one forecast end to end, show it beats or fails to beat simple
+alternatives, quantify uncertainty and meaningful effect size, and state what
+your sample can and cannot rule out. No causal claim about signal decay follows
+automatically from any of these steps.
