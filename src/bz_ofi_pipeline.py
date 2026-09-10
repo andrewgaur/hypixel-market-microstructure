@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from pathlib import Path
+import os
 
 
 
@@ -37,10 +38,36 @@ def main():
 
     #pandas data frame
     #read csv file with all scraped bazaar data
-    df = pd.read_csv(BASE_DIR / "data" / 'bazaar_raw_data2.csv')
+    df = pd.read_csv(BASE_DIR / "data" / 'bazaar_quotes_utc.csv')
+
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True, errors='raise')
     #sorts item in df by timestamp and item (chronological per-item order)
     #and reassigns to df
-    df = df.sort_values(by=['Item', 'Timestamp'])
+    df = df.sort_values(by=['Item', 'Timestamp']).reset_index(drop=True)
+    if df.duplicated(["Item", "Timestamp"]).any():
+        raise ValueError("duplicate item/timestamp rows; check before analysis")
+
+    #checking for any potential errors
+    #missing values, crossed quotes, negative prices/volumes
+    cols = ['Top_Bid', 'Top_Ask', 'Bid_Volume', 'Ask_Volume']
+
+    if not np.isfinite(df[cols].to_numpy(dtype=float)).all():
+        raise ValueError('Missing or nonfinite quote/volume values')
+    
+    if (df['Top_Bid'] > df['Top_Ask']).any():
+        raise ValueError('crossed quotes')
+    
+    if (df[["Top_Bid", "Top_Ask"]] <= 0).any().any():
+        raise ValueError('non-positive prices')
+    
+    if (df[["Bid_Volume", "Ask_Volume"]] < 0).any().any():
+        raise ValueError('negative volume')
+
+
+    #check actual time gaps and add columns for each
+    df['Prev_Gap_Actual'] = df.groupby('Item')['Timestamp'].diff().dt.total_seconds()
+    df['Next_Timestamp'] = df.groupby('Item')['Timestamp'].shift(-1)
+    df['Next_Gap_Actual'] = (df['Next_Timestamp'] - df['Timestamp']).dt.total_seconds()
 
 
     '''
@@ -73,8 +100,10 @@ def main():
     #has to run at end to make sure .shift() isn't running on filtered data w/ gaps
 
     GAP_THRESHOLD = 90
-    df['Next_Gap'] = df.groupby('Item')['Seconds_Since_Fetch'].shift(-1)
-    df = df[(df['Seconds_Since_Fetch'] <= GAP_THRESHOLD) & (df['Next_Gap'] <= GAP_THRESHOLD)]
+    df = df[
+        df['Prev_Gap_Actual'].between(1, GAP_THRESHOLD)
+        & df['Next_Gap_Actual'].between(1, GAP_THRESHOLD)
+        ].copy()
 
 
     ### ACTUAL TESTING
@@ -132,14 +161,23 @@ def main():
     ax.set_ylabel('-log10(p-value)')
     ax.legend()
     plt.tight_layout()
-    plt.savefig(BASE_DIR / "results-fix" / 'ofi_volcano_plot_oos.png', dpi=150)
 
-    test_data.to_csv(BASE_DIR / "results-fix" / 'test_data.csv', index=False)
+    #outputs to results directory
+    OUTPUT_DIR = BASE_DIR / "results-v0.2"
+    OUTPUT_DIR.mkdir(parents = True, exist_ok= True)
+
+    if not os.path.exists(OUTPUT_DIR):
+        print(f"output directory {OUTPUT_DIR} doesn't exist")
+    else:
+        print(f"output directory {OUTPUT_DIR} found, saving results")
+
+    plt.savefig(OUTPUT_DIR / 'ofi_volcano_plot_oos.png', dpi=150)
+
+    test_data.to_csv(OUTPUT_DIR / 'test_data.csv', index=False)
     results_df = pd.DataFrame(results)
-    results_df.to_csv(BASE_DIR / "results-fix" / 'ofi_corr_summary.csv', index=False)
+    results_df.to_csv(OUTPUT_DIR / 'ofi_corr_summary.csv', index=False)
 
 
 #execute main only if this specific script is directly executed
 if __name__ == "__main__":
-    # main()
-    pass
+    main()
