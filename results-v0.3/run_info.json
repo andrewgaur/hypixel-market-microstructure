@@ -1,0 +1,19 @@
+{
+  "status": "complete",
+  "source_input": "C:\\Program Files\\projects-main\\hypixel-market-microstructure\\data\\bazaar_quotes_utc.csv",
+  "analyzed_snapshot": "C:\\Program Files\\projects-main\\hypixel-market-microstructure\\results-v0.3\\input_snapshot.csv",
+  "input_sha256": "d5877dd78190c3f09705881e4c4802e3752135a5c2dcbab09b17f36abaf8e2ad",
+  "gap_seconds": 90,
+  "horizon_minutes": 1,
+  "tolerance_seconds": 30,
+  "train_fraction": 0.7,
+  "quality": {
+    "input_rows": 38907,
+    "valid_rows": 38907,
+    "rejected_rows": 0,
+    "items": 7,
+    "segments": 186,
+    "rejection_reason_counts": {}
+  },
+  "train_test_cutoff_utc": "2026-09-12T17:36:53.843221+00:00"
+}
