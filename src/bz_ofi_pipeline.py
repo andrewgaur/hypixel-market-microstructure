@@ -31,7 +31,6 @@ import json
 import math
 import shutil
 from pathlib import Path
-import matplotlib.pyplot as plt
 
 # the two required analysis libraries
 import numpy as np
@@ -49,8 +48,8 @@ REQUIRED_COLUMNS = (
     "Item",
     "Top_Bid",
     "Top_Ask",
-    "Bid_Volume"
-    "Ask_Volume"
+    "Bid_Volume",
+    "Ask_Volume",
 )
 
 
@@ -453,163 +452,187 @@ def train_and_test(labeled: pd.DataFrame, train_fraction: float) -> tuple[
     return combined, pd.DataFrame(summaries), cutoff
 
 
+def save_plot(predictions: pd.DataFrame, output: Path) -> None:
+
+    '''
+    make the test results easier to visually inspect
+
+    if matplotlib is installed, draw actual vs predicted returns for each item.
+    the diagonal reference line represents perfect predictions
+    '''
+
+    if predictions.empty:
+        return
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+    except ImportError:
+        (output / "plot_not_created.txt").write_text("install matplotlib to create" \
+        "the optional chart.\n", encoding="utf-8")
+        return
+
+    items = sorted(predictions["Item"].unique())
+    columns = 2
+    rows = math.ceil(len(items) / columns)
+
+    figure, axes = plt.subplots(rows,
+        columns,
+        figsize = (10, 4 * rows),
+        squeeze = False )
+
+    for axis, item in zip(axes.flat, items):
+        group = predictions[predictions["Item"] == item]
+        actual = group["Future_Return_Bps"]
+        predicted = group["Predicted_OFI_Return_Bps"]
+
+        axis.scatter(actual, predicted, s=8, alpha=0.45)
+
+        low = min(actual.min(), predicted.min())
+        high = max(actual.max(), predicted.max())
+
+        axis.plot([low, high], [low, high], "--", color="black", linewidth=1)
+
+        axis.set_title(item)
+        axis.set_xlabel("Actual future return (bp)")
+        axis.set_ylabel("Predicted future return (bp)")
+
+    for axis in axes.flat[len(items) :]:
+        axis.set_visible(False)
+
+    figure.suptitle("Held-out predictions versus outcomes")
+    figure.tight_layout()
+
+    figure.savefig(output / "predictions_vs_actual.png", dpi=150)
+
+    plt.close(figure)
 
 
+def self_test() -> None:
 
-            
+    '''
+    catch mistakes with tiny known examples. checks hand-calculated OFI (+9),
+    create intentional collection gap, verify neither OFI nor a future target crosses it.
+    '''
 
+    assert calculate_ofi(99, 101, 15, 8, 99, 101, 10, 12) == 9
+    raw = pd.DataFrame(
+        {
+            "Timestamp": pd.to_datetime(
+                ["2026-01-01T00:00:00Z", 
+                "2026-01-01T00:01:00Z", 
+                "2026-01-01T00:02:00Z", 
+                "2026-01-01T00:10:00Z", 
+                "2026-01-01T00:11:00Z"]
+                ),
+            "Item": "TEST",
+             "Top_Bid": [99] * 5,
+            "Top_Ask": [101] * 5,
+            "Bid_Volume": [10, 15, 16, 20, 21],
+            "Ask_Volume": [12, 8, 8, 10, 10],
+        }
+    )
 
+    valid, rejected, _ = audit_segment_and_add_ofi(raw, 90)
 
+    assert rejected.empty
 
-#most of the program in main(), excluding imports and functions
-#this lets tests import the calculations without running the entire program
-def main():
-    BASE_DIR = Path(__file__).resolve().parent.parent
+    assert valid["Segment"].tolist() == [1,1,1,2,2]
+    assert math.isnan(valid.loc[3, "OFI"])
 
+    labeled = add_future_return(valid, 1, 1)
+    assert pd.isna(labeled.loc[2, "Target_Timestamp"])
 
+    print("self-test passed")
 
-    #pandas data frame
-    #read csv file with all scraped bazaar data
-    df = pd.read_csv(BASE_DIR / "data" / 'bazaar_quotes_utc.csv')
+def main() -> int:
+    '''
+    run the complete small analysis in a clear order
 
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True, errors='raise')
-    #sorts item in df by timestamp and item (chronological per-item order)
-    #and reassigns to df
-    df = df.sort_values(by=['Item', 'Timestamp']).reset_index(drop=True)
-    if df.duplicated(["Item", "Timestamp"]).any():
-        raise ValueError("duplicate item/timestamp rows; check before analysis")
-
-    #checking for any potential errors
-    #missing values, crossed quotes, negative prices/volumes
-    cols = ['Top_Bid', 'Top_Ask', 'Bid_Volume', 'Ask_Volume']
-
-    if not np.isfinite(df[cols].to_numpy(dtype=float)).all():
-        raise ValueError('Missing or nonfinite quote/volume values')
-    
-    if (df['Top_Bid'] > df['Top_Ask']).any():
-        raise ValueError('crossed quotes')
-    
-    if (df[["Top_Bid", "Top_Ask"]] <= 0).any().any():
-        raise ValueError('non-positive prices')
-    
-    if (df[["Bid_Volume", "Ask_Volume"]] < 0).any().any():
-        raise ValueError('negative volume')
-
-
-    #check actual time gaps and add columns for each
-    df['Prev_Gap_Actual'] = df.groupby('Item')['Timestamp'].diff().dt.total_seconds()
-    df['Next_Timestamp'] = df.groupby('Item')['Timestamp'].shift(-1)
-    df['Next_Gap_Actual'] = (df['Next_Timestamp'] - df['Timestamp']).dt.total_seconds()
+    validate settings, create frozen input copy, call each function,
+    save evidence as CSV or JSON in one new output folder
 
 
     '''
-    OFI measures whether buyers (bids) or sellers (asks) are
-    more aggressive. using pandas, i'll compare the current row to
-    the previous row
-    '''
 
-    #isolate previous states by creating new columns
-    #repeat for each value
-    df['Prev_Top_Bid'] = df.groupby('Item')['Top_Bid'].shift(1)
-    df['Prev_Top_Ask'] = df.groupby('Item')['Top_Ask'].shift(1)
+    arguments = parse_arguments()
+    if arguments.self_test:
+        self_test()
+        return 0
 
-    df['Prev_Bid_Vol'] = df.groupby('Item')['Bid_Volume'].shift(1)
-    df['Prev_Ask_Vol'] = df.groupby('Item')['Ask_Volume'].shift(1)
+    if arguments.input is None:
+        raise SystemExit("--input is required unless --self-test is used")
 
+    if arguments.gap_seconds <= 0 or arguments.horizon_minutes <= 0 or (
+        arguments.tolerance_seconds < 0 ):
 
-    #apply function to every row in df
-    # axis=1 means row by row
-    df['OFI'] = df.apply(calculate_ofi, axis=1)
+        raise SystemExit("gap and horizon must be positive; tolerance can't be negative")
 
+    if not 0.5 <= arguments.train_fraction < 1:
+        raise SystemExit("--train-fraction must be atleast 0.5 and less than 1")
 
-    #mid-price used as real 'current value'
-    #define prediction target
-    df['Mid_Price'] = (df['Top_Bid']+df['Top_Ask'])/2
-    df['Next_Mid_Price'] = df.groupby('Item')['Mid_Price'].shift(-1)
+    input_path = arguments.input.expanduser().resolve()
+    output = arguments.output.expanduser().resolve()
 
+    if not input_path.is_file():
+        raise SystemExit(f"input CSV not found: {input_path}")
+    
+    if output.exists():
+        if not arguments.overwrite:
+            raise SystemExit(f"output already exists: {output}; use --overwrite deliberately")
 
-    #get rid of rows where gap between fetches is too large to use
-    #has to run at end to make sure .shift() isn't running on filtered data w/ gaps
+        if output == Path(output.anchor) or input_path.is_relative_to(output):
+             raise SystemExit("refusing to replace a filesystem root or folder containing the input")
 
-    GAP_THRESHOLD = 90
-    df = df[
-        df['Prev_Gap_Actual'].between(1, GAP_THRESHOLD)
-        & df['Next_Gap_Actual'].between(1, GAP_THRESHOLD)
-        ].copy()
+        shutil.rmtree(output)
 
+    output.mkdir(parents=True)
 
-    ### ACTUAL TESTING
+    
+    snapshot = output / "input_snapshot.csv"
+    shutil.copyfile(input_path, snapshot)
+    run_info = {
+        "status": "started",
+        "source_input": str(input_path),
+        "analyzed_snapshot": str(snapshot),
+        "input_sha256": sha256(snapshot),
+        "gap_seconds": arguments.gap_seconds,
+        "horizon_minutes": arguments.horizon_minutes,
+        "tolerance_seconds": arguments.tolerance_seconds,
+        "train_fraction": arguments.train_fraction,
+    }
 
-    df['Future_Price_Change'] = df['Next_Mid_Price'] - df['Mid_Price']
+    try:
+        raw = pd.read_csv(snapshot)
 
-    #drop first & last rows since some data will be empty due to shifting
-    df = df.dropna(subset=['OFI', 'Future_Price_Change'])
+        valid, rejected, quality = audit_segment_and_add_ofi(raw, arguments.gap_seconds)
+        labeled = add_future_return(valid, arguments.horizon_minutes, arguments.tolerance_seconds)
+        predictions, summary, cutoff = train_and_test(labeled, arguments.train_fraction)
 
-    #split 70/30 to avoid lookahead bias
-    #find row index representing 70 percent of data
-    #split data chronologically
-    #using .iloc (index location)
+        rejected.to_csv(output / "rejected_rows.csv", index=False)
 
-    train_parts = []
-    test_parts = []
+        labeled.to_csv(output / "analyzed_rows.csv", index=False)
+        predictions.to_csv(output / "test_predictions.csv", index=False)
 
-    for item, group in df.groupby('Item'):
-        #group sorted by time already
-        split_point = int(len(group) * 0.70)
-        train_parts.append(group.iloc[:split_point])
-        test_parts.append(group.iloc[split_point:])
+        summary.to_csv(output / "results_summary.csv", index=False)
+        save_plot(predictions, output)
 
-    train_data = pd.concat(train_parts)
-    test_data = pd.concat(test_parts)
+        run_info.update({"status": "complete", 
+            "quality": quality, 
+            "train_test_cutoff_utc": cutoff.isoformat()
+            })
 
-    results = []
-    for item, g in test_data.groupby('Item'):
-        r, p = stats.pearsonr(g['OFI'], g['Future_Price_Change'])
-        results.append({'item': item, 'n': len(g), 'corr': r, 'pval': p})
-
-
-    #calculate correlation on data from outside sample
-    correlation = test_data['OFI'].corr(test_data['Future_Price_Change'])
-    print(f"OFI to Future Price Change Correlation: {correlation:.4f}")
-    #if correlation is positive, higher OFI generally leads to a price increase
-
-
-    #visualize the correlation, p-value, and n
-
-    fig, ax = plt.subplots(figsize=(8,6))
-
-    for row in results:
-        ax.scatter(row['corr'], -np.log10(row['pval']), s=80)
-        ax.annotate(row['item'], (row['corr'], -np.log10(row['pval'])),
-                    textcoords="offset points", xytext=(5, 5), fontsize=8)
-
-    n_tests = len(results)
-    ax.axhline(-np.log10(0.05), color='gray', linestyle='--', label='p = 0.05')
-    ax.axhline(-np.log10(0.05 / n_tests), color='red', linestyle='--',
-            label=f'Bonferroni threshold (p = {0.05/n_tests:.4f})')
-    ax.axvline(0, color='black', linewidth=0.8)
-
-    ax.set_xlabel('OFI - Future Price Change Correlation')
-    ax.set_ylabel('-log10(p-value)')
-    ax.legend()
-    plt.tight_layout()
-
-    #outputs to results directory
-    OUTPUT_DIR = BASE_DIR / "results-v0.2"
-    OUTPUT_DIR.mkdir(parents = True, exist_ok= True)
-
-    if not os.path.exists(OUTPUT_DIR):
-        print(f"output directory {OUTPUT_DIR} doesn't exist")
-    else:
-        print(f"output directory {OUTPUT_DIR} found, saving results")
-
-    plt.savefig(OUTPUT_DIR / 'ofi_volcano_plot_oos.png', dpi=150)
-
-    test_data.to_csv(OUTPUT_DIR / 'test_data.csv', index=False)
-    results_df = pd.DataFrame(results)
-    results_df.to_csv(OUTPUT_DIR / 'ofi_corr_summary.csv', index=False)
+    except Exception as error:
+        run_info.update({"status": "failed", "error": f"{type(error).__name__}: {error}"})
+        raise
+    finally:
+        (output / "run_info.json").write_text(json.dumps(run_info, indent=2, default=str), encoding="utf-8")
+    print(f"complete: {output}")
+    return 0
 
 
-#execute main only if this specific script is directly executed
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
+
