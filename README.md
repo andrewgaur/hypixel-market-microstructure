@@ -53,17 +53,6 @@ python bz_ofi_pipeline.py      # process collected data and generate results
 ```
 
 
-# My Notes
-- this is me talking myself through my process and code.
-
-explanation for null result on skyblock project:
-basically the test i ran was to see if the short-term changes in volume could accurately predict mid-price movements (mid price being average of top bids/ask).
-
-Essentially what i learned the hard way was that in high frequency trading, like in the skyblock market, volume signals disappear incredibly fast, much faster than i could update the dataset. by the time a minute passed, the signal was mostly random noise. to pick up on any real relationship, i would need a much faster tracking setup to capture data every millisecond rather than every minute. the model I made returned a null result because metrics like OFI decay far much faster than I measured and need millisecond-level tick data to return results that aren't just noise.
-
-Basically: the short term volume changes i measured don't predict price movements because metrics like OFI decay quickly, and my measurements were too slow.
-
-
 ## intended next steps
 - several more weeks of data
 - immutable raw data plus cleaned Parquet files and a documented schema
