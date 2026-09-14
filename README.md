@@ -22,7 +22,7 @@ This project polls the bazaar API once a minute and logs the top-of-book bid/ask
 
 Data and quality checks (9/13/2026)
 
-The frozen input contained 38,907 rows covering seven Bazaar items from September 9 through September 13, 2026. All 38,907 rows passed the script's basic checks, so no rows were rejected for invalid timestamps, missing values, duplicate item timestamp pairs, non-positive prices, negative volumes, or crossed quotes.
+The frozen input contained ~40,000 rows covering seven Bazaar items from September 9 through September 13, 2026. All frozen rows passed the script's basic checks, so no rows were rejected for invalid timestamps, missing values, duplicate item timestamp pairs, non-positive prices, negative volumes, or crossed quotes.
 
 The script divided the data into 186 continuous per-item segments. A new segment was started after a collection gap longer than 90 seconds, which prevented OFI or future-return calculations from crossing an outage.
 
@@ -33,7 +33,7 @@ The final test set contained 11,558 predictions. The accepted prediction horizon
 
 ## Results
 
-Version 0.3 tested whether snapshot order flow imbalance could predict the Bazaar midpoint return approximately one minute later. The analysis used 38,907 valid observations across seven items, separated collection outages into continuous segments, trained each item's model on the earlier 70% of the data, and evaluated it on the later 30%. All seven OFI/return correlations were close to zero, ranging from -0.047 to +0.034. The OFI model also produced a higher mean absolute error than both a zero-return baseline and a training-average baseline for every item. 
+Version 0.3 tested whether snapshot order flow imbalance could predict the Bazaar midpoint return approximately one minute later. The analysis used about 40,000 valid observations across seven items, separated collection outages into continuous segments, trained each item's model on the earlier 70% of the data, and evaluated it on the later 30%. All seven OFI/return correlations were close to zero, ranging from -0.047 to +0.034. The OFI model also produced a higher mean absolute error than both a zero-return baseline and a training-average baseline for every item. 
 
 These results do not show a useful one-minute predictive relationship in the current sample, although they do not rule out other OFI definitions, horizons, market conditions, or nonlinear relationships. Because this is one short dataset with a single holdout period and no time-series-aware confidence intervals, the result should be treated as a preliminary null finding.
 
