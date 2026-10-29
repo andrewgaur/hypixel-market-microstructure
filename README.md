@@ -45,8 +45,6 @@ In the predictions-versus-outcomes chart, a perfect model would place its points
 
 - Short sample: the relatively small sample size is not representative of different days, player population/counts, updates, or game events.
 - Many zero returns: two items have unchanged mid-prices between two snapshots more than 70% of the time.
-- One horizon: the target is the next succesful snapshot, normally about 60 seconds later, rather than a set of fixed elapsed-time horizons.
-- No fitted baseline: at the moment, the current training data block is unused, and the analysis does not compare predictions with zero-change, sign, or persistence baselines.
 - Top-of-book only: displayed price and quantity at the best level don't describe the full order book or executed trades.
 
 ## Running 
