@@ -1,4 +1,3 @@
-#hypixel skyblock bazaar ofi
 import requests
 import time
 import os
@@ -37,7 +36,7 @@ RAW_DIR.mkdir(exist_ok = True)
 
 CSV_FILENAME = DATA_DIR / "bazaar_quotes_utc.csv"
 
-#create csv /efile w/ headers
+#create csv file w/ headers
 # mode = write to make new file
 
 #check if file exists
@@ -81,6 +80,9 @@ while True:
         received_at = datetime.now(timezone.utc)
         current_time = received_at.isoformat(timespec="microseconds")
 
+
+        # credit codex for this part, particularly hashing and saving the raw responses. probably smart idea
+
         # put each day's responses in a separate folder
         day_dir = RAW_DIR / received_at.strftime("%Y-%m-%d")
         day_dir.mkdir(exist_ok = True)
@@ -118,7 +120,7 @@ while True:
         '''
 
         #check if API returned properly
-        if data.get("success") == True:
+        if data.get("success"):
 
             #checking time
             now = time.time()
@@ -151,14 +153,14 @@ while True:
 
                         product = data["products"][item]
 
-                        '''
+                        ''' outdated comment from when this was specific to hyp skyblock
                         skyblock names the summaries backwards,
                         from the perspective of someone trading immediately
                         ie, the players perspective
                         buy summary is the offers I can buy from (asks)
                         sell summary is the offers I can sell into (bids)
                         '''
-                        #standing buyers, prices you recieve when selling instantly
+                        #standing buyers, prices you receive when selling instantly
                         bid_orders =  product["sell_summary"]
 
                         #standing sellers, prices you pay when buying instantly
@@ -181,7 +183,7 @@ while True:
                         best_bid_price, best_bid_qty = (best_bid["pricePerUnit"], best_bid["amount"]) if best_bid else (None, None)
                         best_ask_price, best_ask_qty = (best_ask["pricePerUnit"], best_ask["amount"]) if best_ask else (None, None)
 
-                        #have to double check the backwards labelling isnt crossing the data
+                        #have to double check the backwards labelling isn't crossing the data
                         if best_bid_price is None or best_ask_price is None:
                             print(f"Skipping {item}: missing bid or ask")
                             continue
