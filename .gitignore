@@ -5,5 +5,9 @@ analysis-v0.3.txt
 .vscode/
 visuals/
 
-results/bazaar/*
-!results/bazaar/results-v0.2
+results/bazaar/results-v0.1
+
+results/bazaar/results-v0.3/*
+!results/bazaar/results-v0.3/analyzed_rows.csv
+!results/bazaar/results-v0.3/predictions_vs_actual.png
+!results/bazaar/results-v0.3/results_summary.csv
