@@ -14,6 +14,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+"""
+PUT THIS IN C++ LATER ??
+"""
+
 
 # from scipy import stats # unused? forget why I needed this for something initially
 # import os

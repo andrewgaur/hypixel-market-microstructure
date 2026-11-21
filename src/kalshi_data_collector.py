@@ -8,8 +8,45 @@ from uuid import uuid4
 from pathlib import Path
 
 
-URL = ""
 
+URL = "https://external-api.kalshi.com/trade-api/v2/markets/orderbooks"
+
+"""
+multiple orderbook JSON response
+
+{
+    "orderbooks": [
+        {
+            "ticker": "<string>",
+            "orderbook_fp": {
+                "yes_dollars": [
+                    [
+                    "0.1500", #PRICE
+                    "100.00" #QUANTITY
+                    ]
+                ],
+                "no_dollars": [
+                    [
+                    "0.1500",
+                    "100.00"
+                    ]
+                ]
+            }
+        }
+    ]
+}
+
+if i'm correct,
+saved response would be a dictionary of one item, 'orderbooks', which is a list of dictionaries.
+each dictionary contains a key 'ticker' that has a saved value with the ticker name string,
+also contains a key 'orderbook_fp', which is the orderbook info.
+value keyed by 'orderbook_fp' is a dictionary with two keys, 'yes_dollars' and 'no_dollars',
+each of which is a list of orders for that side of the ticker. each item in the list of orders is a list that contains
+the price and quantity.
+
+"""
+
+# target markets/tickers
 TARGET_MARKETS = [
     
 ]
@@ -71,6 +108,14 @@ while True:
     try:
         response = requests.get(URL, timeout=15)
 
+
+        """
+        INFO
+        saving info about the API request & response
+        """
+
+
+
         # record when computer finishes receiving the response from the API
         received_at = datetime.now(timezone.utc)
         current_time = received_at.isoformat(timespec="microseconds")
@@ -104,7 +149,7 @@ while True:
         #convert the JSON response into a python dict
         data = response.json()
 
-        '''
+        """
         notes to self:
         The .body.gz extension means a compressed response body. Successful responses
         contain JSON, but an error response might contain something else. Saving first
@@ -112,7 +157,15 @@ while True:
 
         If a request fails before any response arrives, there is nothing to save, so
         the existing exception handler will print the error
-        '''
+        """
+
+
+
+
+        """
+        DATA
+        saving & sorting data
+        """
 
         #check if API returned properly
         if data.get("success"):
@@ -136,17 +189,21 @@ while True:
             with open(CSV_FILENAME, mode='a', newline='') as file:
                 writer = csv.writer(file)
 
-                #loop through each item in targeted list
+                # loop through each item in targeted list
+                # for kalshi, look through each market/ticker that is targeted
+                # have to look through each to save individually, easier than saving and sorting multiple orderbooks at once
+
                 for item in TARGET_MARKETS:
 
                     #check item is in data
-                    if item not in data["products"]:
+                    # data is the python dictionary saved from the json response
+                    if item not in data[*"orderbooks"]["ticker"]:
                         print(f"[{current_time}] warning, '{item}' not in API response (check ID?)")
                         continue
 
-                    if item in data["products"]:
+                    if item in data[*"orderbooks"]["ticker"]:
 
-                        product = data["products"][item]
+                        market = data["orderbooks"][item]
 
                         ''' outdated comment from when this was specific to hyp skyblock
                         skyblock names the summaries backwards,
@@ -156,10 +213,22 @@ while True:
                         sell summary is the offers I can sell into (bids)
                         '''
                         #standing buyers, prices you receive when selling instantly
-                        bid_orders =  product["sell_summary"]
+                        yes = market["yes_dollars"]
+                        bid_orders =  market["sell_summary"]
 
                         #standing sellers, prices you pay when buying instantly
-                        ask_orders = product["buy_summary"]
+                        no = market["no_dollars"]
+                        ask_orders = market["buy_summary"]
+
+                        best_yes_pos = max(
+                            yes,
+                            key= lambda x: x[yes[0]] # CHECK THIS w/ api docs
+                        )
+
+                        best_no_pos = max(
+                            no,
+                            key = lambda x: x[no[0]]
+                        )
 
 
                         #explicitly take price and amount
